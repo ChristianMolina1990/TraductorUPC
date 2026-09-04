@@ -3,6 +3,7 @@
   "name": "Traductor — puente de transcripción",
   "version": "1.0",
   "description": "Envía el texto de subtítulos de la pestaña actual al Traductor local (localhost:8000).",
+  "permissions": ["tabCapture", "tabs", "offscreen", "activeTab"],
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
@@ -16,5 +17,5 @@
       "js": ["content.js"]
     }
   ],
-  "action": { "default_title": "Traductor: puente activo" }
+  "action": { "default_title": "Traductor: clic para capturar/soltar el audio de ESTA pestaña" }
 }

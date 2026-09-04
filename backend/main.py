@@ -6,16 +6,19 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import page_translate
 from . import translate as mt
+from .audio_pipeline import AudioPipeline
 from .capture import Capture
 from .config import Settings, MODELS_DIR, PROFILE_DIR
 from .ingest import ingest
 from .pipeline import Pipeline
+from .selection_pipeline import SelectionPipeline
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -48,6 +51,8 @@ async def broadcast(message: dict) -> None:
 
 
 pipeline = Pipeline(capture, settings, broadcast)
+audio_pipeline = AudioPipeline(settings, broadcast)
+selection_pipeline = SelectionPipeline(settings, broadcast)
 
 
 @app.on_event("startup")
@@ -62,6 +67,10 @@ async def _shutdown() -> None:
     with contextlib.suppress(Exception):
         await pipeline.stop()
     with contextlib.suppress(Exception):
+        await audio_pipeline.stop()
+    with contextlib.suppress(Exception):
+        await selection_pipeline.stop()
+    with contextlib.suppress(Exception):
         await capture.stop()
 
 
@@ -72,9 +81,14 @@ async def get_state():
     return {
         "settings": settings.__dict__,
         "pipeline": pipeline.snapshot(),
+        "audio_pipeline": audio_pipeline.snapshot(),
         "languages": mt.installed_languages(),
         "pairs": mt.installed_pairs(),
         "can_translate": mt.can_translate(settings.from_code, settings.to_code),
+        "can_translate_audio": mt.can_translate(settings.audio_from_code, settings.audio_to_code),
+        "can_translate_page": mt.can_translate(settings.page_from_code, settings.page_to_code),
+        "selection_pipeline": selection_pipeline.snapshot(),
+        "can_translate_selection": mt.can_translate(settings.sel_from_code, settings.sel_to_code),
         "ingest": {"age": round(ingest.age(), 1), "chars": len(ingest.text),
                    "source_url": ingest.source_url},
     }
@@ -99,6 +113,9 @@ async def update_settings(payload: dict):
     allowed = {
         "attach_mode", "cdp_url", "target_url", "selector",
         "poll_interval", "idle_flush", "from_code", "to_code",
+        "audio_from_code", "audio_to_code", "whisper_model",
+        "page_from_code", "page_to_code",
+        "sel_from_code", "sel_to_code",
     }
     payload = {k: v for k, v in (payload or {}).items() if k in allowed}
     if payload.get("attach_mode") not in (None, "launch", "cdp", "extension"):
@@ -195,6 +212,107 @@ async def stop():
     return {"ok": True}
 
 
+# --------------------------- Pipeline de audio ---------------------------
+
+@app.post("/api/audio/start")
+async def audio_start():
+    if not mt.can_translate(settings.audio_from_code, settings.audio_to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False,
+                     "error": f"falta el modelo de idioma {settings.audio_from_code}->{settings.audio_to_code}. "
+                              f"Instalalo desde 'Idiomas'"},
+        )
+    await audio_pipeline.start()
+    return {"ok": True}
+
+
+@app.post("/api/audio/stop")
+async def audio_stop():
+    await audio_pipeline.stop()
+    return {"ok": True}
+
+
+@app.post("/api/audio/chunk")
+async def audio_chunk(request: Request):
+    data = await request.body()
+    await audio_pipeline.ingest_chunk(data)
+    return {"ok": True}
+
+
+@app.post("/api/audio/clear")
+async def audio_clear():
+    await audio_pipeline.clear()
+    return {"ok": True}
+
+
+# ----------------------------- Pagina (CAMBRIDGE) -----------------------------
+
+@app.post("/api/page/translate")
+async def page_translate_endpoint(payload: dict):
+    html = (payload or {}).get("html") or ""
+    url = (payload or {}).get("url") or ""
+    from_code = (payload or {}).get("from_code") or settings.page_from_code
+    to_code = (payload or {}).get("to_code") or settings.page_to_code
+    if not html:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "falta html"})
+    if not mt.can_translate(from_code, to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": f"falta el modelo de idioma {from_code}->{to_code}"},
+        )
+    try:
+        translated = await asyncio.to_thread(page_translate.translate_page, html, url, from_code, to_code)
+        return {"ok": True, "html": translated}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+# ------------------------- Selector (traducir seleccion) -------------------------
+
+@app.post("/api/selection/start")
+async def selection_start():
+    if not mt.can_translate(settings.sel_from_code, settings.sel_to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False,
+                     "error": f"falta el modelo de idioma {settings.sel_from_code}->{settings.sel_to_code}"},
+        )
+    await selection_pipeline.start()
+    return {"ok": True}
+
+
+@app.post("/api/selection/stop")
+async def selection_stop():
+    await selection_pipeline.stop()
+    return {"ok": True}
+
+
+@app.post("/api/selection/clear")
+async def selection_clear():
+    await selection_pipeline.clear()
+    return {"ok": True}
+
+
+@app.post("/api/selection/ingest")
+async def selection_ingest(payload: dict):
+    await selection_pipeline.ingest((payload or {}).get("text", ""))
+    return {"ok": True}
+
+
+@app.post("/api/selection/manual")
+async def selection_manual(payload: dict):
+    text = (payload or {}).get("text", "")
+    if not mt.can_translate(settings.sel_from_code, settings.sel_to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False,
+                     "error": f"falta el modelo de idioma {settings.sel_from_code}->{settings.sel_to_code}"},
+        )
+    await selection_pipeline.ingest_manual(text)
+    return {"ok": True}
+
+
 # ------------------------- Gestion de idiomas -------------------------
 
 @app.get("/api/languages")
@@ -238,6 +356,8 @@ async def ws_endpoint(ws: WebSocket):
     try:
         # Enviar estado inicial + historial
         await ws.send_json({"type": "snapshot", **pipeline.snapshot()})
+        await ws.send_json({"type": "audio_snapshot", **audio_pipeline.snapshot()})
+        await ws.send_json({"type": "selection_snapshot", **selection_pipeline.snapshot()})
         while True:
             await ws.receive_text()  # no esperamos mensajes; mantiene viva la conexion
     except WebSocketDisconnect:

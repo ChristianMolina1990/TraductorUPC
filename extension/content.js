@@ -69,4 +69,120 @@
 
   loadConfig();
   setInterval(loadConfig, 5000);
+
+  // Puente con la página del Traductor (localhost:8000) para el modo Audio:
+  // la página no puede llamar a chrome.tabs / chrome.tabCapture directamente,
+  // así que pasa por este content script hasta el service worker.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.__traductor !== true) return;
+    chrome.runtime.sendMessage({ type: data.type, tabId: data.tabId }, (resp) => {
+      window.postMessage({ __traductorResponse: true, requestId: data.requestId, payload: resp }, "*");
+    });
+  });
+  window.postMessage({ __traductorReady: true }, "*");
+
+  // Responde al service worker cuando el modo CAMBRIDGE (espejo de página
+  // traducida) pide el HTML actual de esta pestaña.
+  //
+  // Muchas apps modernas (como CambridgeOne) usan Shadow DOM para encapsular
+  // sus componentes: outerHTML NO incluye ese contenido. Element.getHTML()
+  // (Chrome 124+) sí puede serializarlo si le pasamos los shadow roots
+  // abiertos explícitamente (los cerrados son inaccesibles por diseño de la
+  // plataforma web, no hay forma de leerlos).
+  function collectOpenShadowRoots(root, acc) {
+    const all = root.querySelectorAll ? root.querySelectorAll("*") : [];
+    for (const el of all) {
+      if (el.shadowRoot) {
+        acc.push(el.shadowRoot);
+        collectOpenShadowRoots(el.shadowRoot, acc);
+      }
+    }
+  }
+
+  function serializeDocument() {
+    if (typeof document.documentElement.getHTML !== "function") {
+      return document.documentElement.outerHTML;
+    }
+    try {
+      const roots = [];
+      collectOpenShadowRoots(document.documentElement, roots);
+      const inner = document.documentElement.getHTML({ serializableShadowRoots: true, shadowRoots: roots });
+      const attrs = Array.from(document.documentElement.attributes)
+        .map((a) => `${a.name}="${String(a.value).replace(/"/g, "&quot;")}"`)
+        .join(" ");
+      return `<html ${attrs}>${inner}</html>`;
+    } catch (e) {
+      return document.documentElement.outerHTML;
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg && msg.type === "getHTML") {
+      sendResponse({
+        html: serializeDocument(),
+        url: location.href,
+        title: document.title,
+      });
+      return false;
+    }
+    return false;
+  });
+
+  // Modo Selector: mientras esta activo en esta pestaña, cada seleccion de
+  // texto (raton o teclado) se manda al service worker para traducir.
+  // Debounced para no disparar en cada micro-cambio mientras se arrastra.
+  //
+  // getSelection().toString() NO cruza limites de Shadow DOM (se corta ahi,
+  // perdiendo parrafos en apps como CambridgeOne). getComposedRanges() si lo
+  // hace si se le pasan los shadow roots abiertos.
+  function composedSelectionText(sel) {
+    if (typeof sel.getComposedRanges !== "function") return (sel.toString() || "").trim();
+    try {
+      const roots = [];
+      collectOpenShadowRoots(document.documentElement, roots);
+      const ranges = sel.getComposedRanges({ shadowRoots: roots });
+      if (ranges && ranges.length) {
+        const parts = ranges.map((sr) => {
+          const r = new Range();
+          r.setStart(sr.startContainer, sr.startOffset);
+          r.setEnd(sr.endContainer, sr.endOffset);
+          return r.toString();
+        });
+        const joined = parts.join(" ").trim();
+        if (joined) return joined;
+      }
+    } catch (e) {}
+    return (sel.toString() || "").trim();
+  }
+
+  let selWatching = false;
+  let selLastSent = "";
+  let selTimer = null;
+
+  document.addEventListener("selectionchange", () => {
+    if (!selWatching) return;
+    if (selTimer) clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const sel = window.getSelection ? window.getSelection() : null;
+      const text = sel ? composedSelectionText(sel) : "";
+      if (text && text !== selLastSent) {
+        selLastSent = text;
+        try {
+          chrome.runtime.sendMessage({ type: "selection", text, url: location.href });
+        } catch (e) {}
+      }
+    }, 400);
+  });
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg && msg.type === "watchSelection") {
+      selWatching = !!msg.watch;
+      if (!selWatching) selLastSent = "";
+      sendResponse({ ok: true }); // el llamador espera respuesta; sin esto Chrome
+      return false;                // cierra el puerto con "message port closed…"
+    }
+    return false;
+  });
 })();

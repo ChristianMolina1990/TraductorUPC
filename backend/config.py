@@ -44,6 +44,20 @@ class Settings:
     from_code: str = "en"
     to_code: str = "es"
 
+    # --- Audio (pestana capturada por la extension) ---
+    audio_from_code: str = "en"
+    audio_to_code: str = "es"
+    whisper_model: str = "base"
+
+    # --- Pagina (espejo de una pestana traducida en vivo) ---
+    page_from_code: str = "en"
+    page_to_code: str = "es"
+
+    # --- Selector (traduce lo que el usuario seleccione en una pestana) ---
+    # Nombrado "sel_" para no chocar con el campo "selector" (CSS) de arriba.
+    sel_from_code: str = "en"
+    sel_to_code: str = "es"
+
     def save(self) -> None:
         with _lock:
             CONFIG_PATH.write_text(

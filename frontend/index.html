@@ -4,9 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Traductor de transcripciones en vivo</title>
-  <link rel="stylesheet" href="/styles.css?v=4" />
+  <link rel="stylesheet" href="/styles.css?v=7" />
 </head>
 <body>
+  <div class="app-shell">
+    <nav class="sidebar">
+      <div class="sidebar-title">Traductor</div>
+      <ul class="sidebar-menu">
+        <li><button id="menuTexto" class="sidebar-item active">Texto</button></li>
+        <li><button id="menuAudio" class="sidebar-item">Audio</button></li>
+        <li><button id="menuCambridge" class="sidebar-item">CAMBRIDGE</button></li>
+        <li><button id="menuSelector" class="sidebar-item">Selector</button></li>
+      </ul>
+    </nav>
+
+    <div class="content">
+    <div id="viewTexto" class="view">
   <header class="bar">
     <div class="bar-row">
       <strong class="brand">Traductor en vivo</strong>
@@ -115,7 +128,150 @@
       <ul id="availList" class="list"><li class="muted">— pulsa “Cargar índice online” —</li></ul>
     </div>
   </div>
+    </div>
 
-  <script src="/app.js?v=4"></script>
+    <div id="viewAudio" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">Traductor de audio</strong>
+          <span id="audioDot" class="dot" title="estado"></span>
+          <span id="audioStatus" class="status">detenido</span>
+          <span class="spacer"></span>
+          <button id="btnAudioClear" class="ghost">🗑 Eliminar traducción</button>
+          <button id="btnAudioStop" class="ghost" disabled>■ Detener</button>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Pestaña a capturar <span class="muted">(varias abiertas: elige una)</span></label>
+            <div class="inline">
+              <button id="btnAudioTabs" class="ghost" title="Listar pestañas">↻ Listar pestañas</button>
+            </div>
+            <ul id="audioTabList" class="list"><li class="muted">— pulsa "Listar pestañas" —</li></ul>
+            <div class="ext-help">
+              Chrome exige que la captura se active con un clic real del usuario
+              <b>sobre la pestaña con el audio</b>. Elige una pestaña arriba (te lleva a
+              ella) y luego haz clic en el icono de la extensión <b>Traductor</b> en la
+              barra de Chrome. Vuelve a hacer clic en el icono (o pulsa
+              <b>■ Detener</b> aquí) para parar.
+              <div id="extAudioStatus" class="ext-status">comprobando extensión…</div>
+            </div>
+          </div>
+          <div class="grp">
+            <label>Idioma origen → destino</label>
+            <div class="inline">
+              <select id="audioFromCode"></select>
+              <span>→</span>
+              <select id="audioToCode"></select>
+            </div>
+          </div>
+          <div class="grp">
+            <label>Modelo de voz <span class="muted">(velocidad ↔ precisión)</span></label>
+            <select id="whisperModel">
+              <option value="tiny">Muy rápido (tiny)</option>
+              <option value="base">Rápido (base) — recomendado</option>
+              <option value="small">Equilibrado (small)</option>
+              <option value="medium">Preciso, más lento (medium)</option>
+            </select>
+          </div>
+        </div>
+      </header>
+
+      <main class="panes">
+        <section class="pane">
+          <h2>Transcripción (original)</h2>
+          <div id="audioColOriginal" class="col"></div>
+        </section>
+        <section class="pane">
+          <h2>Traducción (<span id="audioToLabel">es</span>)</h2>
+          <div id="audioColTranslated" class="col"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="viewCambridge" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">CAMBRIDGE</strong>
+          <span id="pageDot" class="dot" title="estado"></span>
+          <span id="pageStatus" class="status">detenido</span>
+          <span class="spacer"></span>
+          <button id="btnPageStart" class="primary">▶ Iniciar</button>
+          <button id="btnPageStop" class="ghost" disabled>■ Detener</button>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Pestaña a espejar y traducir</label>
+            <div class="inline">
+              <select id="pageTabs"><option value="">— pulsa ↻ para listar —</option></select>
+              <button id="btnPageTabs" class="ghost" title="Listar pestañas">↻</button>
+            </div>
+            <div id="extPageStatus" class="ext-status">comprobando extensión…</div>
+          </div>
+          <div class="grp">
+            <label>Idioma origen → destino</label>
+            <div class="inline">
+              <select id="pageFromCode"></select>
+              <span>→</span>
+              <select id="pageToCode"></select>
+            </div>
+          </div>
+        </div>
+      </header>
+      <iframe id="pageFrame" class="page-frame" sandbox referrerpolicy="no-referrer"></iframe>
+    </div>
+
+    <div id="viewSelector" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">Selector</strong>
+          <span id="selDot" class="dot" title="estado"></span>
+          <span id="selStatus" class="status">detenido</span>
+          <span class="spacer"></span>
+          <button id="btnSelClear" class="ghost">🗑 Eliminar traducción</button>
+          <button id="btnSelStart" class="primary">▶ Iniciar</button>
+          <button id="btnSelStop" class="ghost" disabled>■ Detener</button>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Pestaña donde seleccionar texto</label>
+            <div class="inline">
+              <select id="selTabs"><option value="">— pulsa ↻ para listar —</option></select>
+              <button id="btnSelTabs" class="ghost" title="Listar pestañas">↻</button>
+            </div>
+            <div id="extSelStatus" class="ext-status">comprobando extensión…</div>
+          </div>
+          <div class="grp">
+            <label>Idioma origen → destino</label>
+            <div class="inline">
+              <select id="selFromCode"></select>
+              <span>→</span>
+              <select id="selToCode"></select>
+            </div>
+          </div>
+          <div class="grp grow">
+            <label>Pegar texto a mano <span class="muted">(respaldo si la extensión no puede leerlo, p.ej. Shadow DOM cerrado)</span></label>
+            <div class="inline">
+              <input id="selManualInput" type="text" placeholder="Copia (Ctrl+C) el texto en la página y pégalo aquí (Ctrl+V)…" />
+              <button id="btnSelManual" class="primary">Traducir</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="panes">
+        <section class="pane">
+          <h2>Selección (original)</h2>
+          <div id="selColOriginal" class="col"></div>
+        </section>
+        <section class="pane">
+          <h2>Traducción (<span id="selToLabel">es</span>)</h2>
+          <div id="selColTranslated" class="col"></div>
+        </section>
+      </main>
+    </div>
+    </div>
+  </div>
+
+  <script src="/app.js?v=15"></script>
 </body>
 </html>
