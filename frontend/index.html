@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traductor de transcripciones en vivo</title>
+  <link rel="stylesheet" href="/styles.css?v=4" />
+</head>
+<body>
+  <header class="bar">
+    <div class="bar-row">
+      <strong class="brand">Traductor en vivo</strong>
+      <span id="dot" class="dot" title="estado"></span>
+      <span id="status" class="status">detenido</span>
+      <span class="spacer"></span>
+      <button id="btnStart" class="primary">▶ Iniciar</button>
+      <button id="btnStop" class="ghost" disabled>■ Detener</button>
+      <button id="btnConfig" class="ghost">⚙ Configuración</button>
+    </div>
+
+    <div id="config" class="config">
+      <div class="grp">
+        <label>Modo de conexión</label>
+        <select id="attachMode">
+          <option value="extension">Extensión de Chrome (pestaña que ya tengo abierta)</option>
+          <option value="launch">Navegador propio (Playwright)</option>
+          <option value="cdp">Enganchar a mi Chrome (CDP :9222)</option>
+        </select>
+      </div>
+      <div class="grp grow" data-mode="extension">
+        <label>Extensión — pestaña ya abierta</label>
+        <div class="ext-help">
+          1. En Chrome abre <code>chrome://extensions</code> → activa <b>Modo de desarrollador</b> →
+          <b>Cargar descomprimida</b> → elige la carpeta <code>extension/</code> de este proyecto.<br />
+          2. Abre (o recarga) la pestaña de tu clase con los subtítulos activos.<br />
+          3. Aquí abajo debe aparecer <b>señal recibida</b>. Luego pulsa <b>▶ Iniciar</b>.
+          <div id="extStatus" class="ext-status">esperando señal de la extensión…</div>
+        </div>
+      </div>
+      <div class="grp grow" data-mode="launch">
+        <label>URL de la clase / página</label>
+        <div class="inline">
+          <input id="targetUrl" type="text" placeholder="https://upc.class.com/ics/meeting/..." />
+          <button id="btnOpen" class="primary" title="Abrir esa URL en el navegador de captura">Abrir</button>
+        </div>
+      </div>
+      <div class="grp grow" data-mode="cdp">
+        <label>Pestaña abierta en tu Chrome <span class="muted">(arranca Chrome con start-chrome-debug.bat)</span></label>
+        <div class="inline">
+          <select id="tabs"><option value="">— pulsa ↻ para listar —</option></select>
+          <button id="btnTabs" class="ghost" title="Listar pestañas">↻</button>
+          <button id="btnAttach" class="primary" title="Enganchar a la pestaña elegida">Enganchar</button>
+        </div>
+      </div>
+      <div class="grp">
+        <label>Idioma origen → destino</label>
+        <div class="inline">
+          <select id="fromCode"></select>
+          <span>→</span>
+          <select id="toCode"></select>
+          <button id="btnLangs" class="ghost" title="Gestionar modelos de idioma">Idiomas…</button>
+        </div>
+      </div>
+      <div class="grp grow">
+        <label>Selector CSS del panel de subtítulos <span class="muted">(vacío = automático)</span></label>
+        <div class="inline">
+          <input id="selector" type="text" placeholder="ej. .transcript-body  ·  #captions" />
+          <button id="btnPick" class="ghost">Elegir en la página</button>
+          <button id="btnPreview" class="ghost">Probar</button>
+        </div>
+      </div>
+      <div class="grp">
+        <label>Intervalo (s)</label>
+        <input id="pollInterval" type="number" min="0.3" step="0.1" value="1.0" />
+      </div>
+      <div class="grp">
+        <label>Cierre por pausa (s)</label>
+        <input id="idleFlush" type="number" min="0.5" step="0.5" value="2.0" />
+      </div>
+      <div id="preview" class="preview hidden"></div>
+    </div>
+  </header>
+
+  <main class="panes">
+    <section class="pane">
+      <h2>Transcripción (original)</h2>
+      <div id="colOriginal" class="col"></div>
+      <div id="interim" class="interim"></div>
+    </section>
+    <section class="pane">
+      <h2>Traducción (<span id="toLabel">es</span>)</h2>
+      <div id="colTranslated" class="col"></div>
+    </section>
+  </main>
+
+  <!-- Diálogo de idiomas -->
+  <div id="langModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <strong>Modelos de idioma (offline)</strong>
+        <button id="btnCloseLangs" class="ghost">✕</button>
+      </div>
+      <p class="muted">
+        Los pares instalados funcionan sin internet. Puedes añadir modelos dejando
+        archivos <code>.argosmodel</code> en la carpeta <code>models/</code> y pulsando
+        “Sincronizar carpeta”, o descargarlos del índice oficial (requiere internet una vez).
+      </p>
+      <div class="inline">
+        <button id="btnSyncLocal" class="ghost">Sincronizar carpeta models/</button>
+        <button id="btnLoadIndex" class="ghost">Cargar índice online</button>
+      </div>
+      <h4>Instalados</h4>
+      <ul id="pairList" class="list"></ul>
+      <h4>Disponibles en el índice</h4>
+      <ul id="availList" class="list"><li class="muted">— pulsa “Cargar índice online” —</li></ul>
+    </div>
+  </div>
+
+  <script src="/app.js?v=4"></script>
+</body>
+</html>
