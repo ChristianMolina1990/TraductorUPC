@@ -19,6 +19,30 @@ function fmtTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function getColumnText(col) {
+  return Array.from(col.querySelectorAll(".line"))
+    .map((line) => {
+      const clone = line.cloneNode(true);
+      const t = clone.querySelector(".t");
+      if (t) t.remove();
+      return clone.textContent.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function copyColumnToClipboard(colId, btn) {
+  const text = getColumnText($(colId));
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "✓ Copiado";
+  } catch (e) {
+    btn.textContent = "✗ No se pudo copiar";
+  }
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
 function addLine(col, text, ts, fresh) {
   const div = document.createElement("div");
   div.className = "line" + (fresh ? " fresh" : "");
@@ -432,6 +456,8 @@ $("btnAudioClear").onclick = async () => {
   await postJSON("/api/audio/clear", {});
 };
 
+$("btnAudioCopy").onclick = (e) => copyColumnToClipboard("audioColOriginal", e.currentTarget);
+
 // ---------------------------- vista CAMBRIDGE (espejo de página) ----------------------------
 
 function setPageStatus(text, kind) {
@@ -608,6 +634,8 @@ $("btnSelClear").onclick = async () => {
   $("selColTranslated").innerHTML = "";
   await postJSON("/api/selection/clear", {});
 };
+
+$("btnSelCopy").onclick = (e) => copyColumnToClipboard("selColOriginal", e.currentTarget);
 
 async function sendManualSelection() {
   const input = $("selManualInput");
