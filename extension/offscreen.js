@@ -9,15 +9,17 @@ let stream = null;
 let recorder = null;
 let cycleTimer = null;
 let apiBase = "http://localhost:8000";
+let channel = "audio";
 let audioEl = null;
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === "offscreen:start") start(msg.streamId, msg.api);
+  if (msg && msg.type === "offscreen:start") start(msg.streamId, msg.api, msg.channel);
   if (msg && msg.type === "offscreen:stop") stop();
 });
 
-async function start(streamId, api) {
+async function start(streamId, api, ch) {
   apiBase = api || apiBase;
+  channel = ch === "interp" ? "interp" : "audio";
   stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       mandatory: {
@@ -47,7 +49,7 @@ function recordOnce() {
     if (chunks.length) {
       const blob = new Blob(chunks, { type: "audio/webm" });
       const buf = await blob.arrayBuffer();
-      fetch(apiBase + "/api/audio/chunk", {
+      fetch(`${apiBase}/api/${channel}/chunk`, {
         method: "POST",
         headers: { "Content-Type": "audio/webm" },
         body: buf,

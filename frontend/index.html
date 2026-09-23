@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Traductor de transcripciones en vivo</title>
-  <link rel="stylesheet" href="/styles.css?v=7" />
+  <link rel="stylesheet" href="/styles.css?v=9" />
 </head>
 <body>
   <div class="app-shell">
@@ -15,6 +15,7 @@
         <li><button id="menuAudio" class="sidebar-item">Audio</button></li>
         <li><button id="menuCambridge" class="sidebar-item">CAMBRIDGE</button></li>
         <li><button id="menuSelector" class="sidebar-item">Selector</button></li>
+        <li><button id="menuInterprete" class="sidebar-item">Intérprete</button></li>
       </ul>
     </nav>
 
@@ -271,9 +272,103 @@
         </section>
       </main>
     </div>
+
+    <div id="viewInterprete" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">Intérprete</strong>
+          <span id="interpDot" class="dot" title="estado"></span>
+          <span id="interpStatus" class="status">detenido</span>
+          <span class="spacer"></span>
+          <button id="btnInterpSuggest" class="ghost" title="Pedir sugerencia de respuesta ahora">💡 Sugerir respuesta</button>
+          <button id="btnInterpClear" class="ghost">🗑 Eliminar traducción</button>
+          <button id="btnInterpCopy" class="ghost">📋 Copiar transcripción</button>
+          <button id="btnInterpStop" class="ghost" disabled>■ Detener</button>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Pestaña a capturar <span class="muted">(varias abiertas: elige una)</span></label>
+            <div class="inline">
+              <button id="btnInterpTabs" class="ghost" title="Listar pestañas">↻ Listar pestañas</button>
+            </div>
+            <ul id="interpTabList" class="list"><li class="muted">— pulsa "Listar pestañas" —</li></ul>
+            <div class="ext-help">
+              Igual que en <b>Audio</b>: elige la pestaña arriba (te lleva a ella) y haz clic en
+              el icono de la extensión <b>Traductor</b> en la barra de Chrome para empezar a
+              capturar. Vuelve a hacer clic (o pulsa <b>■ Detener</b> aquí) para parar.
+              <div id="extInterpStatus" class="ext-status">comprobando extensión…</div>
+            </div>
+          </div>
+          <div class="grp">
+            <label>Idioma origen → destino</label>
+            <div class="inline">
+              <select id="interpFromCode"></select>
+              <span>→</span>
+              <select id="interpToCode"></select>
+            </div>
+          </div>
+          <div class="grp">
+            <label>Modelo de voz <span class="muted">(velocidad ↔ precisión)</span></label>
+            <select id="interpWhisperModel">
+              <option value="tiny">Muy rápido (tiny)</option>
+              <option value="base">Rápido (base) — recomendado</option>
+              <option value="small">Equilibrado (small)</option>
+              <option value="medium">Preciso, más lento (medium)</option>
+            </select>
+          </div>
+          <div class="grp">
+            <label>Sugerencia de respuesta</label>
+            <select id="interpTrigger">
+              <option value="auto">Automática (tras cada frase)</option>
+              <option value="manual">Manual (botón "💡 Sugerir respuesta")</option>
+            </select>
+          </div>
+          <div class="grp grow">
+            <label>Clave API de Claude (Anthropic)
+              <span class="muted">— solo hace falta para sugerir respuestas; la transcripción y traducción siguen offline</span>
+            </label>
+            <div class="inline">
+              <input id="interpApiKey" type="password" placeholder="sk-ant-…" autocomplete="off" />
+              <button id="btnInterpSaveKey" class="primary">Guardar clave</button>
+              <button id="btnInterpClearKey" class="ghost">Borrar</button>
+            </div>
+            <div id="interpKeyStatus" class="ext-status">comprobando…</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="panes-stack">
+        <div class="section-title">Conversación (audio capturado)</div>
+        <main class="panes">
+          <section class="pane">
+            <h2>Original</h2>
+            <div id="interpColOriginal" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>Traducción (<span id="interpToLabel">es</span>)</h2>
+            <div id="interpColTranslated" class="col"></div>
+          </section>
+        </main>
+        <div class="section-title">💡 Sugerencia de respuesta (inglés)</div>
+        <main class="panes triple">
+          <section class="pane">
+            <h2>Sugerido (en)</h2>
+            <div id="interpColSuggestionEn" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>🗣️ Pronunciación</h2>
+            <div id="interpColPronunciation" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>Traducción (<span id="interpSuggToLabel">es</span>)</h2>
+            <div id="interpColSuggestionEs" class="col"></div>
+          </section>
+        </main>
+      </div>
+    </div>
     </div>
   </div>
 
-  <script src="/app.js?v=16"></script>
+  <script src="/app.js?v=19"></script>
 </body>
 </html>

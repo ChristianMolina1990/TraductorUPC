@@ -100,7 +100,15 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 
 .page-frame { flex: 1; width: 100%; border: none; background: #fff; min-height: 0; }
 
+.panes-stack { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.panes-stack .panes { flex: 1; min-height: 220px; }
+.section-title {
+  padding: 6px 14px; font-size: 12px; font-weight: 600; color: var(--muted);
+  background: var(--panel); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+
 .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
+.panes.triple { grid-template-columns: 1fr 1fr 1fr; }
 .pane { background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
 .pane h2 {
   margin: 0; padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--muted);
@@ -150,7 +158,7 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
   .grp, .grp.grow { min-width: 0; flex-basis: 100%; }
   .inline { flex-wrap: wrap; }
   .inline > input, .inline > select { flex-basis: 100%; }
-  .panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .panes { grid-template-columns: 1fr; grid-auto-rows: minmax(160px, 1fr); }
   .modal-box { padding: 14px; }
 }
 

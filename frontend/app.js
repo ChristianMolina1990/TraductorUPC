@@ -108,6 +108,34 @@ function connectWS() {
       const kind = m.status.startsWith("error") ? "err" : m.running ? "on" : null;
       setSelStatus(m.status, kind);
       applySelRunning(m.running);
+    } else if (m.type === "interp_snapshot") {
+      $("interpColOriginal").innerHTML = "";
+      $("interpColTranslated").innerHTML = "";
+      $("interpColSuggestionEn").innerHTML = "";
+      $("interpColSuggestionEs").innerHTML = "";
+      $("interpColPronunciation").innerHTML = "";
+      (m.history || []).forEach((h) => {
+        addLine($("interpColOriginal"), h.original, h.ts, false);
+        addLine($("interpColTranslated"), h.translated, h.ts, false);
+      });
+      (m.suggestions || []).forEach((h) => {
+        addLine($("interpColSuggestionEn"), h.suggestion_en, h.ts, false);
+        addLine($("interpColSuggestionEs"), h.suggestion_es, h.ts, false);
+        addLine($("interpColPronunciation"), h.pronunciation, h.ts, false);
+      });
+      applyInterpRunning(m.running);
+      if (m.status) setInterpStatus(m.status, m.running ? "on" : null);
+    } else if (m.type === "interp_segment") {
+      addLine($("interpColOriginal"), m.original, m.ts, true);
+      addLine($("interpColTranslated"), m.translated, m.ts, true);
+    } else if (m.type === "interp_suggestion") {
+      addLine($("interpColSuggestionEn"), m.suggestion_en, m.ts, true);
+      addLine($("interpColSuggestionEs"), m.suggestion_es, m.ts, true);
+      addLine($("interpColPronunciation"), m.pronunciation, m.ts, true);
+    } else if (m.type === "interp_status") {
+      const kind = m.status.startsWith("error") || m.status.startsWith("falta") ? "err" : m.running ? "on" : null;
+      setInterpStatus(m.status, kind);
+      applyInterpRunning(m.running);
     }
   };
   ws.onclose = () => { setStatus("desconectado — reintentando…", "err"); setTimeout(connectWS, 1500); };
@@ -172,6 +200,27 @@ async function loadState() {
   if (s.selection_pipeline.status) setSelStatus(s.selection_pipeline.status, s.selection_pipeline.running ? "on" : null);
   if (!s.can_translate_selection) {
     setSelStatus(`falta modelo ${settings.sel_from_code}→${settings.sel_to_code} · abre “Idiomas…”`, "warn");
+  }
+
+  fillLangSelect($("interpFromCode"), settings.interp_from_code);
+  fillLangSelect($("interpToCode"), settings.interp_to_code);
+  $("interpToLabel").textContent = settings.interp_to_code;
+  $("interpSuggToLabel").textContent = settings.interp_to_code;
+  $("interpWhisperModel").value = settings.interp_whisper_model || "base";
+  $("interpTrigger").value = settings.interp_trigger || "auto";
+  applyInterpTriggerUI();
+  applyInterpRunning(s.interp_pipeline.running);
+  if (s.interp_pipeline.status) setInterpStatus(s.interp_pipeline.status, s.interp_pipeline.running ? "on" : null);
+  if (!s.can_translate_interp) {
+    setInterpStatus(`falta modelo ${settings.interp_from_code}→${settings.interp_to_code} · abre “Idiomas…”`, "warn");
+  }
+  const keyStatus = $("interpKeyStatus");
+  if (s.has_anthropic_key) {
+    keyStatus.textContent = "✓ clave guardada";
+    keyStatus.classList.add("ok");
+  } else {
+    keyStatus.textContent = "sin clave configurada — la sugerencia de respuesta no funcionará hasta que la guardes";
+    keyStatus.classList.remove("ok");
   }
 }
 
@@ -392,18 +441,19 @@ async function pollCaptureStatus() {
     extStatus.classList.remove("ok");
     return;
   }
-  if (r.capturing) {
+  const capturingHere = r.capturing && r.channel === "audio";
+  if (capturingHere) {
     extStatus.textContent = `✓ capturando: ${(r.tabTitle || "").slice(0, 80)}`;
     extStatus.classList.add("ok");
   } else {
     extStatus.textContent = "✓ extensión detectada — ve a la pestaña con el audio y haz clic en su icono para empezar";
     extStatus.classList.add("ok");
   }
-  applyAudioRunning(r.capturing);
+  applyAudioRunning(capturingHere);
 }
 setInterval(pollCaptureStatus, 2000);
 
-function renderAudioTabList(tabs, capturingTabId) {
+function renderAudioTabList(tabs, capturingTabId, capturingHere) {
   const ul = $("audioTabList");
   if (!tabs.length) { ul.innerHTML = '<li class="muted">— no hay pestañas abiertas —</li>'; return; }
   ul.innerHTML = "";
@@ -412,7 +462,7 @@ function renderAudioTabList(tabs, capturingTabId) {
     const label = document.createElement("span");
     label.textContent = ((t.audible ? "🔊 " : "") + (t.title || t.url)).slice(0, 90);
     li.appendChild(label);
-    if (t.id === capturingTabId) {
+    if (capturingHere && t.id === capturingTabId) {
       const tag = document.createElement("span");
       tag.className = "muted";
       tag.textContent = "● capturando";
@@ -436,12 +486,14 @@ function renderAudioTabList(tabs, capturingTabId) {
 
 $("btnAudioTabs").onclick = async () => {
   setAudioStatus("listando pestañas…");
+  await extCall("setCaptureChannel", { channel: "audio" });
   const [tabsRes, statusRes] = await Promise.all([extCall("listTabs"), extCall("captureStatus")]);
   if (!tabsRes || !tabsRes.ok) {
     setAudioStatus("no se pudo listar pestañas (¿extensión instalada/recargada?)", "err");
     return;
   }
-  renderAudioTabList(tabsRes.tabs, statusRes && statusRes.tabId);
+  const capturingHere = statusRes && statusRes.capturing && statusRes.channel === "audio";
+  renderAudioTabList(tabsRes.tabs, statusRes && statusRes.tabId, capturingHere);
   setAudioStatus(`${tabsRes.tabs.length} pestañas`);
 };
 
@@ -650,6 +702,146 @@ $("selManualInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendManualSelection();
 });
 
+// ---------------------------- vista Intérprete ----------------------------
+
+function setInterpStatus(text, kind) {
+  $("interpStatus").textContent = text;
+  $("interpDot").className = "dot" + (kind ? " " + kind : "");
+}
+
+function applyInterpRunning(running) {
+  $("btnInterpStop").disabled = !running;
+}
+
+function applyInterpTriggerUI() {
+  $("btnInterpSuggest").style.display = $("interpTrigger").value === "manual" ? "" : "none";
+}
+
+async function saveInterpSettings() {
+  return postJSON("/api/settings", {
+    interp_from_code: $("interpFromCode").value,
+    interp_to_code: $("interpToCode").value,
+    interp_whisper_model: $("interpWhisperModel").value,
+    interp_trigger: $("interpTrigger").value,
+  });
+}
+
+["interpFromCode", "interpToCode", "interpWhisperModel"].forEach((id) => {
+  $(id).addEventListener("change", async () => {
+    await saveInterpSettings();
+    $("interpToLabel").textContent = $("interpToCode").value;
+    $("interpSuggToLabel").textContent = $("interpToCode").value;
+  });
+});
+$("interpTrigger").addEventListener("change", async () => {
+  await saveInterpSettings();
+  applyInterpTriggerUI();
+});
+
+$("btnInterpSaveKey").onclick = async () => {
+  const key = $("interpApiKey").value.trim();
+  if (!key) { setInterpStatus("escribe una clave antes de guardar", "warn"); return; }
+  await postJSON("/api/settings", { anthropic_api_key: key });
+  $("interpApiKey").value = "";
+  await loadState();
+  setInterpStatus("clave guardada", "on");
+};
+
+$("btnInterpClearKey").onclick = async () => {
+  await postJSON("/api/settings", { anthropic_api_key: "" });
+  $("interpApiKey").value = "";
+  await loadState();
+  setInterpStatus("clave eliminada", "warn");
+};
+
+async function pollInterpCaptureStatus() {
+  const extStatus = $("extInterpStatus");
+  const r = await extCall("captureStatus");
+  if (!r) {
+    extStatus.textContent = "no se detectó la extensión — instálala/recárgala (ver extension/README.md) y recarga esta página";
+    extStatus.classList.remove("ok");
+    applyInterpRunning(false);
+    return;
+  }
+  const capturingHere = r.capturing && r.channel === "interp";
+  if (capturingHere) {
+    extStatus.textContent = `✓ capturando: ${(r.tabTitle || "").slice(0, 80)}`;
+    extStatus.classList.add("ok");
+  } else {
+    extStatus.textContent = "✓ extensión detectada — ve a la pestaña con el audio y haz clic en su icono para empezar";
+    extStatus.classList.add("ok");
+  }
+  applyInterpRunning(capturingHere);
+}
+setInterval(pollInterpCaptureStatus, 2000);
+
+function renderInterpTabList(tabs, capturingTabId, capturingHere) {
+  const ul = $("interpTabList");
+  if (!tabs.length) { ul.innerHTML = '<li class="muted">— no hay pestañas abiertas —</li>'; return; }
+  ul.innerHTML = "";
+  tabs.forEach((t) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = ((t.audible ? "🔊 " : "") + (t.title || t.url)).slice(0, 90);
+    li.appendChild(label);
+    if (capturingHere && t.id === capturingTabId) {
+      const tag = document.createElement("span");
+      tag.className = "muted";
+      tag.textContent = "● capturando";
+      li.appendChild(tag);
+    } else {
+      const b = document.createElement("button");
+      b.className = "ghost";
+      b.textContent = "Ir a esta pestaña";
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await extCall("focusTab", { tabId: t.id });
+        b.disabled = false;
+        if (!r || !r.ok) return;
+        setInterpStatus("pestaña activada — haz clic en el icono de la extensión para capturarla");
+      };
+      li.appendChild(b);
+    }
+    ul.appendChild(li);
+  });
+}
+
+$("btnInterpTabs").onclick = async () => {
+  setInterpStatus("listando pestañas…");
+  await extCall("setCaptureChannel", { channel: "interp" });
+  const [tabsRes, statusRes] = await Promise.all([extCall("listTabs"), extCall("captureStatus")]);
+  if (!tabsRes || !tabsRes.ok) {
+    setInterpStatus("no se pudo listar pestañas (¿extensión instalada/recargada?)", "err");
+    return;
+  }
+  const capturingHere = statusRes && statusRes.capturing && statusRes.channel === "interp";
+  renderInterpTabList(tabsRes.tabs, statusRes && statusRes.tabId, capturingHere);
+  setInterpStatus(`${tabsRes.tabs.length} pestañas`);
+};
+
+$("btnInterpStop").onclick = async () => {
+  await extCall("stopAudioCapture");
+  await postJSON("/api/interp/stop", {});
+};
+
+$("btnInterpClear").onclick = async () => {
+  $("interpColOriginal").innerHTML = "";
+  $("interpColTranslated").innerHTML = "";
+  $("interpColSuggestionEn").innerHTML = "";
+  $("interpColSuggestionEs").innerHTML = "";
+  $("interpColPronunciation").innerHTML = "";
+  await postJSON("/api/interp/clear", {});
+};
+
+$("btnInterpCopy").onclick = (e) => copyColumnToClipboard("interpColOriginal", e.currentTarget);
+
+$("btnInterpSuggest").onclick = async () => {
+  $("btnInterpSuggest").disabled = true;
+  const r = await postJSON("/api/interp/suggest", {});
+  $("btnInterpSuggest").disabled = false;
+  if (!r.ok) setInterpStatus(r.error || "no se pudo generar la sugerencia", "err");
+};
+
 // ---------------------------- menú Traductor ----------------------------
 
 function showView(name) {
@@ -657,17 +849,27 @@ function showView(name) {
   $("viewAudio").classList.toggle("hidden", name !== "audio");
   $("viewCambridge").classList.toggle("hidden", name !== "cambridge");
   $("viewSelector").classList.toggle("hidden", name !== "selector");
+  $("viewInterprete").classList.toggle("hidden", name !== "interprete");
   $("menuTexto").classList.toggle("active", name === "texto");
   $("menuAudio").classList.toggle("active", name === "audio");
   $("menuCambridge").classList.toggle("active", name === "cambridge");
   $("menuSelector").classList.toggle("active", name === "selector");
+  $("menuInterprete").classList.toggle("active", name === "interprete");
+  // El canal de captura de audio de la extensión (a qué endpoint van los
+  // clips) sigue a la vista visible, para no depender de que el usuario
+  // pulse "Listar pestañas" antes de hacer clic en el icono de la extensión.
+  if (name === "audio" || name === "interprete") {
+    extCall("setCaptureChannel", { channel: name === "interprete" ? "interp" : "audio" });
+  }
 }
 $("menuTexto").onclick = () => showView("texto");
 $("menuAudio").onclick = () => showView("audio");
 $("menuCambridge").onclick = () => showView("cambridge");
 $("menuSelector").onclick = () => showView("selector");
+$("menuInterprete").onclick = () => showView("interprete");
 
 // ---------------------------- init ----------------------------
 
 loadState().then(connectWS);
 pollCaptureStatus();
+pollInterpCaptureStatus();

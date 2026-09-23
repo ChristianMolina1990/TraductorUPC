@@ -77,9 +77,23 @@
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.__traductor !== true) return;
-    chrome.runtime.sendMessage({ type: data.type, tabId: data.tabId }, (resp) => {
-      window.postMessage({ __traductorResponse: true, requestId: data.requestId, payload: resp }, "*");
-    });
+    const { __traductor, requestId, ...forward } = data;
+    // Si la extension se recargo (chrome://extensions) mientras esta pestana
+    // ya estaba abierta, este content script queda huerfano: cualquier
+    // llamada a chrome.runtime lanza "Extension context invalidated". Se
+    // responde null en vez de dejar la excepcion sin capturar; la pagina ya
+    // sabe mostrar "extension no detectada" en ese caso.
+    try {
+      chrome.runtime.sendMessage(forward, (resp) => {
+        if (chrome.runtime.lastError) {
+          window.postMessage({ __traductorResponse: true, requestId: data.requestId, payload: null }, "*");
+          return;
+        }
+        window.postMessage({ __traductorResponse: true, requestId: data.requestId, payload: resp }, "*");
+      });
+    } catch (e) {
+      window.postMessage({ __traductorResponse: true, requestId: data.requestId, payload: null }, "*");
+    }
   });
   window.postMessage({ __traductorReady: true }, "*");
 

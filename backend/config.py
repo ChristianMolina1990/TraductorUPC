@@ -58,6 +58,15 @@ class Settings:
     sel_from_code: str = "en"
     sel_to_code: str = "es"
 
+    # --- Interprete (transcribe + traduce + sugiere que responder) ---
+    # La transcripcion y la traduccion siguen siendo offline (igual que Audio);
+    # solo la sugerencia de respuesta llama a la API de Claude (Anthropic).
+    interp_from_code: str = "en"
+    interp_to_code: str = "es"
+    interp_whisper_model: str = "base"
+    interp_trigger: str = "auto"  # "auto" = sugiere tras cada frase | "manual" = con boton
+    anthropic_api_key: str = ""
+
     def save(self) -> None:
         with _lock:
             CONFIG_PATH.write_text(

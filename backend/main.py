@@ -17,6 +17,7 @@ from .audio_pipeline import AudioPipeline
 from .capture import Capture
 from .config import Settings, MODELS_DIR, PROFILE_DIR
 from .ingest import ingest
+from .interp_pipeline import InterpreterPipeline
 from .pipeline import Pipeline
 from .selection_pipeline import SelectionPipeline
 
@@ -53,6 +54,7 @@ async def broadcast(message: dict) -> None:
 pipeline = Pipeline(capture, settings, broadcast)
 audio_pipeline = AudioPipeline(settings, broadcast)
 selection_pipeline = SelectionPipeline(settings, broadcast)
+interp_pipeline = InterpreterPipeline(settings, broadcast)
 
 
 @app.on_event("startup")
@@ -71,6 +73,8 @@ async def _shutdown() -> None:
     with contextlib.suppress(Exception):
         await selection_pipeline.stop()
     with contextlib.suppress(Exception):
+        await interp_pipeline.stop()
+    with contextlib.suppress(Exception):
         await capture.stop()
 
 
@@ -78,8 +82,9 @@ async def _shutdown() -> None:
 
 @app.get("/api/state")
 async def get_state():
+    public_settings = {k: v for k, v in settings.__dict__.items() if k != "anthropic_api_key"}
     return {
-        "settings": settings.__dict__,
+        "settings": public_settings,
         "pipeline": pipeline.snapshot(),
         "audio_pipeline": audio_pipeline.snapshot(),
         "languages": mt.installed_languages(),
@@ -89,6 +94,9 @@ async def get_state():
         "can_translate_page": mt.can_translate(settings.page_from_code, settings.page_to_code),
         "selection_pipeline": selection_pipeline.snapshot(),
         "can_translate_selection": mt.can_translate(settings.sel_from_code, settings.sel_to_code),
+        "interp_pipeline": interp_pipeline.snapshot(),
+        "can_translate_interp": mt.can_translate(settings.interp_from_code, settings.interp_to_code),
+        "has_anthropic_key": bool(settings.anthropic_api_key),
         "ingest": {"age": round(ingest.age(), 1), "chars": len(ingest.text),
                    "source_url": ingest.source_url},
     }
@@ -116,6 +124,8 @@ async def update_settings(payload: dict):
         "audio_from_code", "audio_to_code", "whisper_model",
         "page_from_code", "page_to_code",
         "sel_from_code", "sel_to_code",
+        "interp_from_code", "interp_to_code", "interp_whisper_model",
+        "interp_trigger", "anthropic_api_key",
     }
     payload = {k: v for k, v in (payload or {}).items() if k in allowed}
     if payload.get("attach_mode") not in (None, "launch", "cdp", "extension"):
@@ -124,7 +134,8 @@ async def update_settings(payload: dict):
     # Reflejar en Capture (surte efecto al reconectar / al proximo ensure_page).
     capture.attach_mode = settings.attach_mode
     capture.cdp_url = settings.cdp_url
-    return {"ok": True, "settings": settings.__dict__}
+    public_settings = {k: v for k, v in settings.__dict__.items() if k != "anthropic_api_key"}
+    return {"ok": True, "settings": public_settings, "has_anthropic_key": bool(settings.anthropic_api_key)}
 
 
 @app.get("/api/tabs")
@@ -246,6 +257,45 @@ async def audio_clear():
     return {"ok": True}
 
 
+# --------------------------- Pipeline Intérprete ---------------------------
+
+@app.post("/api/interp/start")
+async def interp_start():
+    if not mt.can_translate(settings.interp_from_code, settings.interp_to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False,
+                     "error": f"falta el modelo de idioma {settings.interp_from_code}->{settings.interp_to_code}. "
+                              f"Instalalo desde 'Idiomas'"},
+        )
+    await interp_pipeline.start()
+    return {"ok": True}
+
+
+@app.post("/api/interp/stop")
+async def interp_stop():
+    await interp_pipeline.stop()
+    return {"ok": True}
+
+
+@app.post("/api/interp/chunk")
+async def interp_chunk(request: Request):
+    data = await request.body()
+    await interp_pipeline.ingest_chunk(data)
+    return {"ok": True}
+
+
+@app.post("/api/interp/clear")
+async def interp_clear():
+    await interp_pipeline.clear()
+    return {"ok": True}
+
+
+@app.post("/api/interp/suggest")
+async def interp_suggest():
+    return await interp_pipeline.suggest_manual()
+
+
 # ----------------------------- Pagina (CAMBRIDGE) -----------------------------
 
 @app.post("/api/page/translate")
@@ -358,6 +408,7 @@ async def ws_endpoint(ws: WebSocket):
         await ws.send_json({"type": "snapshot", **pipeline.snapshot()})
         await ws.send_json({"type": "audio_snapshot", **audio_pipeline.snapshot()})
         await ws.send_json({"type": "selection_snapshot", **selection_pipeline.snapshot()})
+        await ws.send_json({"type": "interp_snapshot", **interp_pipeline.snapshot()})
         while True:
             await ws.receive_text()  # no esperamos mensajes; mantiene viva la conexion
     except WebSocketDisconnect:

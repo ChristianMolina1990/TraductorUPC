@@ -11,6 +11,8 @@ const API = "http://localhost:8000";
 
 let capturingTabId = null;
 let capturingTabTitle = "";
+let capturingChannel = "audio"; // canal realmente en uso mientras se captura
+let captureChannel = "audio";   // canal elegido desde la página del Traductor antes de capturar
 
 async function ensureOffscreen() {
   const has = await chrome.offscreen.hasDocument();
@@ -30,19 +32,22 @@ async function setBadge(tabId, capturing) {
 
 async function startAudioCapture(tab) {
   if (capturingTabId) await stopAudioCapture();
+  const channel = captureChannel === "interp" ? "interp" : "audio";
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   await ensureOffscreen();
-  await chrome.runtime.sendMessage({ type: "offscreen:start", streamId, api: API });
+  await chrome.runtime.sendMessage({ type: "offscreen:start", streamId, api: API, channel });
   capturingTabId = tab.id;
   capturingTabTitle = tab.title || tab.url || "";
+  capturingChannel = channel;
   await setBadge(tab.id, true);
-  await fetch(API + "/api/audio/start", { method: "POST" }).catch(() => {});
+  await fetch(`${API}/api/${channel}/start`, { method: "POST" }).catch(() => {});
   return { ok: true };
 }
 
 async function stopAudioCapture() {
   if (!capturingTabId) return { ok: true };
   const tabId = capturingTabId;
+  const channel = capturingChannel;
   capturingTabId = null;
   capturingTabTitle = "";
   try {
@@ -50,7 +55,7 @@ async function stopAudioCapture() {
   } catch (e) {}
   await chrome.offscreen.closeDocument().catch(() => {});
   await setBadge(tabId, false).catch(() => {});
-  await fetch(API + "/api/audio/stop", { method: "POST" }).catch(() => {});
+  await fetch(`${API}/api/${channel}/stop`, { method: "POST" }).catch(() => {});
   return { ok: true };
 }
 
@@ -80,7 +85,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // respuesta asíncrona
   }
   if (msg && msg.type === "captureStatus") {
-    sendResponse({ ok: true, capturing: !!capturingTabId, tabId: capturingTabId, tabTitle: capturingTabTitle });
+    sendResponse({
+      ok: true,
+      capturing: !!capturingTabId,
+      tabId: capturingTabId,
+      tabTitle: capturingTabTitle,
+      channel: capturingTabId ? capturingChannel : captureChannel,
+    });
+    return false;
+  }
+  if (msg && msg.type === "setCaptureChannel") {
+    captureChannel = msg.channel === "interp" ? "interp" : "audio";
+    sendResponse({ ok: true, channel: captureChannel });
     return false;
   }
   if (msg && msg.type === "stopAudioCapture") {
