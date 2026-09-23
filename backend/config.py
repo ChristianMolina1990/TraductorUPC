@@ -65,6 +65,8 @@ class Settings:
     interp_to_code: str = "es"
     interp_whisper_model: str = "base"
     interp_trigger: str = "auto"  # "auto" = sugiere tras cada frase | "manual" = con boton
+    # Temas que el usuario quiere tratar; orientan las sugerencias de Claude.
+    interp_topics: str = ""
     anthropic_api_key: str = ""
 
     def save(self) -> None:

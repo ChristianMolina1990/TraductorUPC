@@ -125,7 +125,7 @@ async def update_settings(payload: dict):
         "page_from_code", "page_to_code",
         "sel_from_code", "sel_to_code",
         "interp_from_code", "interp_to_code", "interp_whisper_model",
-        "interp_trigger", "anthropic_api_key",
+        "interp_trigger", "interp_topics", "anthropic_api_key",
     }
     payload = {k: v for k, v in (payload or {}).items() if k in allowed}
     if payload.get("attach_mode") not in (None, "launch", "cdp", "extension"):
@@ -292,8 +292,9 @@ async def interp_clear():
 
 
 @app.post("/api/interp/suggest")
-async def interp_suggest():
-    return await interp_pipeline.suggest_manual()
+async def interp_suggest(payload: dict | None = None):
+    kind = (payload or {}).get("kind", "reply")
+    return await interp_pipeline.suggest_manual(kind)
 
 
 # ----------------------------- Pagina (CAMBRIDGE) -----------------------------

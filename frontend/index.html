@@ -4,18 +4,24 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Traductor de transcripciones en vivo</title>
-  <link rel="stylesheet" href="/styles.css?v=9" />
+  <link rel="stylesheet" href="/styles.css?v=14" />
 </head>
 <body>
   <div class="app-shell">
-    <nav class="sidebar">
-      <div class="sidebar-title">Traductor</div>
+    <nav id="sidebar" class="sidebar">
+      <div class="sidebar-title">
+        <span class="sidebar-title-text">Traductor</span>
+        <button id="btnSidebarToggle" class="sidebar-toggle" title="Contraer menú">«</button>
+      </div>
       <ul class="sidebar-menu">
         <li><button id="menuTexto" class="sidebar-item active">Texto</button></li>
         <li><button id="menuAudio" class="sidebar-item">Audio</button></li>
         <li><button id="menuCambridge" class="sidebar-item">CAMBRIDGE</button></li>
         <li><button id="menuSelector" class="sidebar-item">Selector</button></li>
         <li><button id="menuInterprete" class="sidebar-item">Intérprete</button></li>
+      </ul>
+      <ul class="sidebar-menu sidebar-bottom">
+        <li><button id="menuConfig" class="sidebar-item">⚙ Configuración</button></li>
       </ul>
     </nav>
 
@@ -280,7 +286,10 @@
           <span id="interpDot" class="dot" title="estado"></span>
           <span id="interpStatus" class="status">detenido</span>
           <span class="spacer"></span>
+          <button id="btnInterpStart" class="ghost" title="Sugerir cómo abrir la conversación a partir de los temas a tratar">🚀 Iniciar conversación</button>
           <button id="btnInterpSuggest" class="ghost" title="Pedir sugerencia de respuesta ahora">💡 Sugerir respuesta</button>
+          <button id="btnInterpComplement" class="ghost" title="Ampliar la última respuesta sugerida con un detalle o ejemplo">➕ Complementar respuesta</button>
+          <button id="btnInterpQuestion" class="ghost" title="Sugerir una pregunta para el interlocutor sobre el tema">❓ Hacer una pregunta</button>
           <button id="btnInterpClear" class="ghost">🗑 Eliminar traducción</button>
           <button id="btnInterpCopy" class="ghost">📋 Copiar transcripción</button>
           <button id="btnInterpStop" class="ghost" disabled>■ Detener</button>
@@ -290,8 +299,9 @@
             <label>Pestaña a capturar <span class="muted">(varias abiertas: elige una)</span></label>
             <div class="inline">
               <button id="btnInterpTabs" class="ghost" title="Listar pestañas">↻ Listar pestañas</button>
+              <button id="btnInterpTabsToggle" class="ghost" title="Contraer / expandir la lista de pestañas">▴ Contraer</button>
             </div>
-            <ul id="interpTabList" class="list"><li class="muted">— pulsa "Listar pestañas" —</li></ul>
+            <ul id="interpTabList" class="list tab-list"><li class="muted">— pulsa "Listar pestañas" —</li></ul>
             <div class="ext-help">
               Igual que en <b>Audio</b>: elige la pestaña arriba (te lleva a ella) y haz clic en
               el icono de la extensión <b>Traductor</b> en la barra de Chrome para empezar a
@@ -319,20 +329,19 @@
           <div class="grp">
             <label>Sugerencia de respuesta</label>
             <select id="interpTrigger">
-              <option value="auto">Automática (tras cada frase)</option>
-              <option value="manual">Manual (botón "💡 Sugerir respuesta")</option>
+              <option value="auto">Automática (tras cada pausa) + botones</option>
+              <option value="manual">Solo con los botones</option>
             </select>
           </div>
-          <div class="grp grow">
-            <label>Clave API de Claude (Anthropic)
-              <span class="muted">— solo hace falta para sugerir respuestas; la transcripción y traducción siguen offline</span>
+          <div class="grp full">
+            <label>Temas a tratar
+              <span class="muted">— Claude orienta las sugerencias hacia ellos; con temas escritos puedes pedir una pregunta o respuesta para abrir la conversación</span>
             </label>
-            <div class="inline">
-              <input id="interpApiKey" type="password" placeholder="sk-ant-…" autocomplete="off" />
-              <button id="btnInterpSaveKey" class="primary">Guardar clave</button>
-              <button id="btnInterpClearKey" class="ghost">Borrar</button>
-            </div>
-            <div id="interpKeyStatus" class="ext-status">comprobando…</div>
+            <textarea id="interpTopics" rows="3" placeholder="Ej.: presentarme, mi carrera en la UPC, mis hobbies, planes para el futuro…"></textarea>
+            <div id="interpTopicsStatus" class="ext-status"></div>
+          </div>
+          <div class="grp full">
+            <div id="interpKeyStatus" class="ext-status link" title="Ir a Configuración">comprobando clave de Claude…</div>
           </div>
         </div>
       </header>
@@ -366,9 +375,32 @@
         </main>
       </div>
     </div>
+
+    <div id="viewConfig" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">Configuración</strong>
+          <span id="configDot" class="dot" title="estado"></span>
+          <span id="configStatus" class="status"></span>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Clave API de Claude (Anthropic)
+              <span class="muted">— se usa en todo el aplicativo para las funciones con IA (hoy: sugerencias del Intérprete); la transcripción y traducción siguen offline</span>
+            </label>
+            <div class="inline">
+              <input id="anthropicApiKey" type="password" placeholder="sk-ant-…" autocomplete="off" />
+              <button id="btnSaveApiKey" class="primary">Guardar clave</button>
+              <button id="btnClearApiKey" class="ghost">Borrar</button>
+            </div>
+            <div id="apiKeyStatus" class="ext-status">comprobando…</div>
+          </div>
+        </div>
+      </header>
+    </div>
     </div>
   </div>
 
-  <script src="/app.js?v=19"></script>
+  <script src="/app.js?v=26"></script>
 </body>
 </html>

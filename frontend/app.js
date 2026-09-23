@@ -119,9 +119,9 @@ function connectWS() {
         addLine($("interpColTranslated"), h.translated, h.ts, false);
       });
       (m.suggestions || []).forEach((h) => {
-        addLine($("interpColSuggestionEn"), h.suggestion_en, h.ts, false);
-        addLine($("interpColSuggestionEs"), h.suggestion_es, h.ts, false);
-        addLine($("interpColPronunciation"), h.pronunciation, h.ts, false);
+        addLine($("interpColSuggestionEn"), suggestionPrefix(h.kind) + h.suggestion_en, h.ts, false);
+        addLine($("interpColSuggestionEs"), suggestionPrefix(h.kind) + h.suggestion_es, h.ts, false);
+        addLine($("interpColPronunciation"), suggestionPrefix(h.kind) + h.pronunciation, h.ts, false);
       });
       applyInterpRunning(m.running);
       if (m.status) setInterpStatus(m.status, m.running ? "on" : null);
@@ -129,9 +129,9 @@ function connectWS() {
       addLine($("interpColOriginal"), m.original, m.ts, true);
       addLine($("interpColTranslated"), m.translated, m.ts, true);
     } else if (m.type === "interp_suggestion") {
-      addLine($("interpColSuggestionEn"), m.suggestion_en, m.ts, true);
-      addLine($("interpColSuggestionEs"), m.suggestion_es, m.ts, true);
-      addLine($("interpColPronunciation"), m.pronunciation, m.ts, true);
+      addLine($("interpColSuggestionEn"), suggestionPrefix(m.kind) + m.suggestion_en, m.ts, true);
+      addLine($("interpColSuggestionEs"), suggestionPrefix(m.kind) + m.suggestion_es, m.ts, true);
+      addLine($("interpColPronunciation"), suggestionPrefix(m.kind) + m.pronunciation, m.ts, true);
     } else if (m.type === "interp_status") {
       const kind = m.status.startsWith("error") || m.status.startsWith("falta") ? "err" : m.running ? "on" : null;
       setInterpStatus(m.status, kind);
@@ -208,20 +208,25 @@ async function loadState() {
   $("interpSuggToLabel").textContent = settings.interp_to_code;
   $("interpWhisperModel").value = settings.interp_whisper_model || "base";
   $("interpTrigger").value = settings.interp_trigger || "auto";
+  // No pisar lo que el usuario esta escribiendo si se recarga el estado.
+  if (document.activeElement !== $("interpTopics")) $("interpTopics").value = settings.interp_topics || "";
   applyInterpTriggerUI();
   applyInterpRunning(s.interp_pipeline.running);
   if (s.interp_pipeline.status) setInterpStatus(s.interp_pipeline.status, s.interp_pipeline.running ? "on" : null);
   if (!s.can_translate_interp) {
     setInterpStatus(`falta modelo ${settings.interp_from_code}→${settings.interp_to_code} · abre “Idiomas…”`, "warn");
   }
-  const keyStatus = $("interpKeyStatus");
+  const keyStatus = $("apiKeyStatus");
+  const interpKeyStatus = $("interpKeyStatus");
   if (s.has_anthropic_key) {
     keyStatus.textContent = "✓ clave guardada";
-    keyStatus.classList.add("ok");
+    interpKeyStatus.textContent = "✓ clave de Claude configurada (⚙ Configuración)";
   } else {
-    keyStatus.textContent = "sin clave configurada — la sugerencia de respuesta no funcionará hasta que la guardes";
-    keyStatus.classList.remove("ok");
+    keyStatus.textContent = "sin clave configurada — las funciones con IA no funcionarán hasta que la guardes";
+    interpKeyStatus.textContent = "⚠ sin clave de Claude: las sugerencias no funcionarán — configúrala en ⚙ Configuración";
   }
+  keyStatus.classList.toggle("ok", !!s.has_anthropic_key);
+  interpKeyStatus.classList.toggle("ok", !!s.has_anthropic_key);
 }
 
 function collectSettings() {
@@ -714,7 +719,13 @@ function applyInterpRunning(running) {
 }
 
 function applyInterpTriggerUI() {
-  $("btnInterpSuggest").style.display = $("interpTrigger").value === "manual" ? "" : "none";
+  // Los botones de sugerencia se muestran siempre: en modo auto sirven para
+  // pedir una sugerencia sin esperar a la pausa del interlocutor.
+}
+
+const SUGGESTION_PREFIX = { start: "🚀 ", complement: "➕ ", question: "❓ " };
+function suggestionPrefix(kind) {
+  return SUGGESTION_PREFIX[kind] || "";
 }
 
 async function saveInterpSettings() {
@@ -738,21 +749,24 @@ $("interpTrigger").addEventListener("change", async () => {
   applyInterpTriggerUI();
 });
 
-$("btnInterpSaveKey").onclick = async () => {
-  const key = $("interpApiKey").value.trim();
-  if (!key) { setInterpStatus("escribe una clave antes de guardar", "warn"); return; }
-  await postJSON("/api/settings", { anthropic_api_key: key });
-  $("interpApiKey").value = "";
-  await loadState();
-  setInterpStatus("clave guardada", "on");
-};
+// Los temas se guardan solos poco despues de dejar de escribir.
+let interpTopicsTimer;
+async function saveInterpTopics() {
+  clearTimeout(interpTopicsTimer);
+  interpTopicsTimer = null;
+  const r = await postJSON("/api/settings", { interp_topics: $("interpTopics").value });
+  $("interpTopicsStatus").textContent = r.ok ? "✓ temas guardados" : "no se pudieron guardar los temas";
+  $("interpTopicsStatus").classList.toggle("ok", !!r.ok);
+}
+$("interpTopics").addEventListener("input", () => {
+  $("interpTopicsStatus").textContent = "guardando…";
+  $("interpTopicsStatus").classList.remove("ok");
+  clearTimeout(interpTopicsTimer);
+  interpTopicsTimer = setTimeout(saveInterpTopics, 800);
+});
+$("interpTopics").addEventListener("blur", saveInterpTopics);
 
-$("btnInterpClearKey").onclick = async () => {
-  await postJSON("/api/settings", { anthropic_api_key: "" });
-  $("interpApiKey").value = "";
-  await loadState();
-  setInterpStatus("clave eliminada", "warn");
-};
+$("interpKeyStatus").onclick = () => showView("config");
 
 async function pollInterpCaptureStatus() {
   const extStatus = $("extInterpStatus");
@@ -799,12 +813,23 @@ function renderInterpTabList(tabs, capturingTabId, capturingHere) {
         b.disabled = false;
         if (!r || !r.ok) return;
         setInterpStatus("pestaña activada — haz clic en el icono de la extensión para capturarla");
+        // Ya se eligio la pestaña: se contrae la lista para dejar sitio a la conversación.
+        setInterpTabsCollapsed(true);
       };
       li.appendChild(b);
     }
     ul.appendChild(li);
   });
 }
+
+function setInterpTabsCollapsed(collapsed) {
+  $("interpTabList").classList.toggle("hidden", collapsed);
+  $("btnInterpTabsToggle").textContent = collapsed ? "▾ Expandir" : "▴ Contraer";
+}
+
+$("btnInterpTabsToggle").onclick = () => {
+  setInterpTabsCollapsed(!$("interpTabList").classList.contains("hidden"));
+};
 
 $("btnInterpTabs").onclick = async () => {
   setInterpStatus("listando pestañas…");
@@ -816,6 +841,7 @@ $("btnInterpTabs").onclick = async () => {
   }
   const capturingHere = statusRes && statusRes.capturing && statusRes.channel === "interp";
   renderInterpTabList(tabsRes.tabs, statusRes && statusRes.tabId, capturingHere);
+  setInterpTabsCollapsed(false);
   setInterpStatus(`${tabsRes.tabs.length} pestañas`);
 };
 
@@ -835,12 +861,68 @@ $("btnInterpClear").onclick = async () => {
 
 $("btnInterpCopy").onclick = (e) => copyColumnToClipboard("interpColOriginal", e.currentTarget);
 
-$("btnInterpSuggest").onclick = async () => {
-  $("btnInterpSuggest").disabled = true;
-  const r = await postJSON("/api/interp/suggest", {});
-  $("btnInterpSuggest").disabled = false;
-  if (!r.ok) setInterpStatus(r.error || "no se pudo generar la sugerencia", "err");
+const INTERP_SUGGEST_BUTTONS = {
+  start: "btnInterpStart",
+  reply: "btnInterpSuggest",
+  complement: "btnInterpComplement",
+  question: "btnInterpQuestion",
 };
+const INTERP_SUGGEST_LABELS = {
+  start: "inicio de conversación",
+  reply: "respuesta",
+  complement: "complemento",
+  question: "pregunta",
+};
+
+async function requestInterpSuggestion(kind) {
+  // Asegura que el backend tenga los temas recien escritos antes de pedir nada.
+  if (interpTopicsTimer) await saveInterpTopics();
+  const buttons = Object.values(INTERP_SUGGEST_BUTTONS).map((id) => $(id));
+  buttons.forEach((b) => (b.disabled = true));
+  const prevStatus = $("interpStatus").textContent;
+  const prevDot = $("interpDot").className.replace(/^dot\s*/, "") || null;
+  setInterpStatus(`generando ${INTERP_SUGGEST_LABELS[kind]}…`, "warn");
+  try {
+    const r = await postJSON("/api/interp/suggest", { kind });
+    if (r.ok) setInterpStatus(prevStatus, prevDot);
+    else setInterpStatus(r.error || "no se pudo generar la sugerencia", "err");
+  } catch (e) {
+    setInterpStatus("no se pudo contactar con el servidor", "err");
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+Object.entries(INTERP_SUGGEST_BUTTONS).forEach(([kind, id]) => {
+  $(id).onclick = () => requestInterpSuggestion(kind);
+});
+
+// ---------------------------- vista Configuración ----------------------------
+
+function setConfigStatus(text, kind) {
+  $("configStatus").textContent = text;
+  $("configDot").className = "dot" + (kind ? " " + kind : "");
+}
+
+$("btnSaveApiKey").onclick = async () => {
+  const key = $("anthropicApiKey").value.trim();
+  if (!key) { setConfigStatus("escribe una clave antes de guardar", "warn"); return; }
+  await postJSON("/api/settings", { anthropic_api_key: key });
+  $("anthropicApiKey").value = "";
+  await loadState();
+  setConfigStatus("clave guardada", "on");
+};
+
+$("btnClearApiKey").onclick = async () => {
+  await postJSON("/api/settings", { anthropic_api_key: "" });
+  $("anthropicApiKey").value = "";
+  await loadState();
+  setConfigStatus("clave eliminada", "warn");
+};
+
+$("anthropicApiKey").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("btnSaveApiKey").click();
+});
 
 // ---------------------------- menú Traductor ----------------------------
 
@@ -850,11 +932,13 @@ function showView(name) {
   $("viewCambridge").classList.toggle("hidden", name !== "cambridge");
   $("viewSelector").classList.toggle("hidden", name !== "selector");
   $("viewInterprete").classList.toggle("hidden", name !== "interprete");
+  $("viewConfig").classList.toggle("hidden", name !== "config");
   $("menuTexto").classList.toggle("active", name === "texto");
   $("menuAudio").classList.toggle("active", name === "audio");
   $("menuCambridge").classList.toggle("active", name === "cambridge");
   $("menuSelector").classList.toggle("active", name === "selector");
   $("menuInterprete").classList.toggle("active", name === "interprete");
+  $("menuConfig").classList.toggle("active", name === "config");
   // El canal de captura de audio de la extensión (a qué endpoint van los
   // clips) sigue a la vista visible, para no depender de que el usuario
   // pulse "Listar pestañas" antes de hacer clic en el icono de la extensión.
@@ -862,11 +946,22 @@ function showView(name) {
     extCall("setCaptureChannel", { channel: name === "interprete" ? "interp" : "audio" });
   }
 }
+// Menú lateral contraíble; se recuerda la preferencia en este navegador.
+function setSidebarCollapsed(collapsed) {
+  $("sidebar").classList.toggle("collapsed", collapsed);
+  $("btnSidebarToggle").textContent = collapsed ? "»" : "«";
+  $("btnSidebarToggle").title = collapsed ? "Expandir menú" : "Contraer menú";
+  try { localStorage.setItem("sidebarCollapsed", collapsed ? "1" : "0"); } catch (e) {}
+}
+$("btnSidebarToggle").onclick = () => setSidebarCollapsed(!$("sidebar").classList.contains("collapsed"));
+try { if (localStorage.getItem("sidebarCollapsed") === "1") setSidebarCollapsed(true); } catch (e) {}
+
 $("menuTexto").onclick = () => showView("texto");
 $("menuAudio").onclick = () => showView("audio");
 $("menuCambridge").onclick = () => showView("cambridge");
 $("menuSelector").onclick = () => showView("selector");
 $("menuInterprete").onclick = () => showView("interprete");
+$("menuConfig").onclick = () => showView("config");
 
 // ---------------------------- init ----------------------------
 
