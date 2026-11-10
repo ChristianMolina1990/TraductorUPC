@@ -136,6 +136,27 @@ function connectWS() {
       const kind = m.status.startsWith("error") || m.status.startsWith("falta") ? "err" : m.running ? "on" : null;
       setInterpStatus(m.status, kind);
       applyInterpRunning(m.running);
+    } else if (m.type === "interpcap_snapshot") {
+      ICAP_COLS.forEach((id) => ($(id).innerHTML = ""));
+      (m.history || []).forEach((h) => {
+        addLine($("icapColOriginal"), h.original, h.ts, false);
+        addLine($("icapColTranslated"), h.translated, h.ts, false);
+      });
+      (m.suggestions || []).forEach((h) => addIcapSuggestion(h, false));
+      applyIcapRunning(m.running);
+      if (m.status) setIcapStatus(m.status, m.running ? "on" : null);
+      applyIcapFrame(m.send_image, m.image_ts);
+    } else if (m.type === "interpcap_segment") {
+      addLine($("icapColOriginal"), m.original, m.ts, true);
+      addLine($("icapColTranslated"), m.translated, m.ts, true);
+    } else if (m.type === "interpcap_suggestion") {
+      addIcapSuggestion(m, true);
+    } else if (m.type === "interpcap_status") {
+      const kind = m.status.startsWith("error") || m.status.startsWith("falta") ? "err" : m.running ? "on" : null;
+      setIcapStatus(m.status, kind);
+      applyIcapRunning(m.running);
+    } else if (m.type === "interpcap_frame") {
+      applyIcapFrame(m.send_image, m.image_ts);
     }
   };
   ws.onclose = () => { setStatus("desconectado — reintentando…", "err"); setTimeout(connectWS, 1500); };
@@ -227,6 +248,7 @@ async function loadState() {
   }
   keyStatus.classList.toggle("ok", !!s.has_anthropic_key);
   interpKeyStatus.classList.toggle("ok", !!s.has_anthropic_key);
+  applyIcapState(s);
 }
 
 function collectSettings() {
@@ -897,6 +919,238 @@ Object.entries(INTERP_SUGGEST_BUTTONS).forEach(([kind, id]) => {
   $(id).onclick = () => requestInterpSuggestion(kind);
 });
 
+// ---------------------------- vista Intérprete – Captura ----------------------------
+// Mismo flujo que Intérprete (canal "interpcap"), más la captura de la pestaña.
+// Idiomas, modelo de voz, modo y temas se leen de la configuración del
+// Intérprete; aquí solo se elige si se envía o no la captura.
+
+const ICAP_COLS = ["icapColOriginal", "icapColTranslated", "icapColSuggestionEn",
+  "icapColSuggestionEs", "icapColPronunciation"];
+let icapRunning = false;
+let icapSendImage = false;
+
+function setIcapStatus(text, kind) {
+  $("icapStatus").textContent = text;
+  $("icapDot").className = "dot" + (kind ? " " + kind : "");
+}
+
+function applyIcapRunning(running) {
+  icapRunning = !!running;
+  $("btnIcapStop").disabled = !running;
+  $("btnIcapCaptureNow").disabled = !(icapRunning && icapSendImage);
+}
+
+function addIcapSuggestion(h, fresh) {
+  const prefix = (h.with_image ? "🖼 " : "") + suggestionPrefix(h.kind);
+  addLine($("icapColSuggestionEn"), prefix + h.suggestion_en, h.ts, fresh);
+  addLine($("icapColSuggestionEs"), prefix + h.suggestion_es, h.ts, fresh);
+  addLine($("icapColPronunciation"), prefix + h.pronunciation, h.ts, fresh);
+}
+
+// Interruptor + miniatura de la última captura.
+function applyIcapFrame(sendImage, imageTs) {
+  icapSendImage = !!sendImage;
+  $("icapSendImage").checked = icapSendImage;
+  $("btnIcapCaptureNow").disabled = !(icapRunning && icapSendImage);
+  const info = $("icapImageInfo");
+  const img = $("icapThumb");
+  const empty = $("icapThumbEmpty");
+  img.parentElement.classList.toggle("off", !icapSendImage);
+  if (!icapSendImage) {
+    info.textContent = "desactivada — no se envía imagen (sin coste extra)";
+    info.classList.remove("ok");
+    img.classList.add("hidden");
+    img.removeAttribute("src");
+    empty.textContent = "captura desactivada";
+    empty.classList.remove("hidden");
+    return;
+  }
+  if (imageTs) {
+    info.textContent = `✓ activada — última captura ${fmtTime(imageTs)} (se envía con cada sugerencia)`;
+    info.classList.add("ok");
+    img.src = `/api/interpcap/frame?ts=${imageTs}`;
+    img.classList.remove("hidden");
+    empty.classList.add("hidden");
+  } else {
+    info.textContent = "✓ activada — esperando la primera captura de la pestaña…";
+    info.classList.add("ok");
+    img.classList.add("hidden");
+    img.removeAttribute("src");
+    empty.textContent = "sin captura todavía";
+    empty.classList.remove("hidden");
+  }
+}
+
+function applyIcapState(s) {
+  const st = s.settings || {};
+  $("icapToLabel").textContent = st.interp_to_code;
+  $("icapSuggToLabel").textContent = st.interp_to_code;
+  const topics = (st.interp_topics || "").trim();
+  const summary = $("icapSharedSummary");
+  summary.innerHTML = "";
+  [
+    ["Idiomas", `${st.interp_from_code} → ${st.interp_to_code}`],
+    ["Modelo de voz", st.interp_whisper_model || "base"],
+    ["Sugerencia", st.interp_trigger === "manual" ? "solo con los botones" : "automática + botones"],
+    ["Temas", topics ? (topics.length > 80 ? topics.slice(0, 80) + "…" : topics) : "— ninguno —"],
+  ].forEach(([k, v]) => {
+    const row = document.createElement("div");
+    const b = document.createElement("b");
+    b.textContent = k + ": ";
+    row.appendChild(b);
+    row.appendChild(document.createTextNode(v));
+    summary.appendChild(row);
+  });
+  const p = s.interpcap_pipeline || {};
+  applyIcapRunning(p.running);
+  if (p.status) setIcapStatus(p.status, p.running ? "on" : null);
+  if (!s.can_translate_interp) {
+    setIcapStatus(`falta modelo ${st.interp_from_code}→${st.interp_to_code} · abre “Idiomas…”`, "warn");
+  }
+  applyIcapFrame(p.send_image, p.image_ts);
+  const ks = $("icapKeyStatus");
+  ks.textContent = s.has_anthropic_key
+    ? "✓ clave de Claude configurada (⚙ Configuración)"
+    : "⚠ sin clave de Claude: las sugerencias no funcionarán — configúrala en ⚙ Configuración";
+  ks.classList.toggle("ok", !!s.has_anthropic_key);
+}
+
+$("icapSendImage").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  let r = null;
+  try { r = await postJSON("/api/settings", { interpcap_send_image: on }); } catch (err) {}
+  if (!r || !r.ok) {
+    e.target.checked = !on;
+    setIcapStatus("no se pudo guardar el interruptor", "err");
+    return;
+  }
+  // El backend también avisa por WebSocket (interpcap_frame) cuando llega una captura.
+  applyIcapFrame(on, 0);
+});
+
+$("btnIcapCaptureNow").onclick = async () => {
+  const r = await postJSON("/api/interpcap/capture-now", {});
+  if (!r.ok) setIcapStatus(r.error || "no se pudo pedir la captura", "err");
+  else setIcapStatus("captura solicitada…", "on");
+};
+
+$("btnIcapEditShared").onclick = () => showView("interprete");
+$("icapKeyStatus").onclick = () => showView("config");
+
+async function pollIcapCaptureStatus() {
+  const extStatus = $("extIcapStatus");
+  const r = await extCall("captureStatus");
+  if (!r) {
+    extStatus.textContent = "no se detectó la extensión — instálala/recárgala (ver extension/README.md) y recarga esta página";
+    extStatus.classList.remove("ok");
+    applyIcapRunning(false);
+    return;
+  }
+  const capturingHere = r.capturing && r.channel === "interpcap";
+  extStatus.textContent = capturingHere
+    ? `✓ capturando: ${(r.tabTitle || "").slice(0, 80)}`
+    : "✓ extensión detectada — ve a la pestaña y haz clic en su icono para empezar";
+  extStatus.classList.add("ok");
+  applyIcapRunning(capturingHere);
+}
+setInterval(pollIcapCaptureStatus, 2000);
+
+function setIcapTabsCollapsed(collapsed) {
+  $("icapTabList").classList.toggle("hidden", collapsed);
+  $("btnIcapTabsToggle").textContent = collapsed ? "▾ Expandir" : "▴ Contraer";
+}
+
+function renderIcapTabList(tabs, capturingTabId, capturingHere) {
+  const ul = $("icapTabList");
+  if (!tabs.length) { ul.innerHTML = '<li class="muted">— no hay pestañas abiertas —</li>'; return; }
+  ul.innerHTML = "";
+  tabs.forEach((t) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = ((t.audible ? "🔊 " : "") + (t.title || t.url)).slice(0, 90);
+    li.appendChild(label);
+    if (capturingHere && t.id === capturingTabId) {
+      const tag = document.createElement("span");
+      tag.className = "muted";
+      tag.textContent = "● capturando";
+      li.appendChild(tag);
+    } else {
+      const b = document.createElement("button");
+      b.className = "ghost";
+      b.textContent = "Ir a esta pestaña";
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await extCall("focusTab", { tabId: t.id });
+        b.disabled = false;
+        if (!r || !r.ok) return;
+        setIcapStatus("pestaña activada — haz clic en el icono de la extensión para capturarla");
+        setIcapTabsCollapsed(true);
+      };
+      li.appendChild(b);
+    }
+    ul.appendChild(li);
+  });
+}
+
+$("btnIcapTabsToggle").onclick = () => {
+  setIcapTabsCollapsed(!$("icapTabList").classList.contains("hidden"));
+};
+
+$("btnIcapTabs").onclick = async () => {
+  setIcapStatus("listando pestañas…");
+  await extCall("setCaptureChannel", { channel: "interpcap" });
+  const [tabsRes, statusRes] = await Promise.all([extCall("listTabs"), extCall("captureStatus")]);
+  if (!tabsRes || !tabsRes.ok) {
+    setIcapStatus("no se pudo listar pestañas (¿extensión instalada/recargada?)", "err");
+    return;
+  }
+  const capturingHere = statusRes && statusRes.capturing && statusRes.channel === "interpcap";
+  renderIcapTabList(tabsRes.tabs, statusRes && statusRes.tabId, capturingHere);
+  setIcapTabsCollapsed(false);
+  setIcapStatus(`${tabsRes.tabs.length} pestañas`);
+};
+
+$("btnIcapStop").onclick = async () => {
+  await extCall("stopAudioCapture");
+  await postJSON("/api/interpcap/stop", {});
+};
+
+$("btnIcapClear").onclick = async () => {
+  ICAP_COLS.forEach((id) => ($(id).innerHTML = ""));
+  await postJSON("/api/interpcap/clear", {});
+};
+
+$("btnIcapCopy").onclick = (e) => copyColumnToClipboard("icapColOriginal", e.currentTarget);
+
+const ICAP_SUGGEST_BUTTONS = {
+  start: "btnIcapStart",
+  reply: "btnIcapSuggest",
+  complement: "btnIcapComplement",
+  question: "btnIcapQuestion",
+};
+
+async function requestIcapSuggestion(kind) {
+  const buttons = Object.values(ICAP_SUGGEST_BUTTONS).map((id) => $(id));
+  buttons.forEach((b) => (b.disabled = true));
+  const prevStatus = $("icapStatus").textContent;
+  const prevDot = $("icapDot").className.replace(/^dot\s*/, "") || null;
+  const withImg = icapSendImage ? " (con captura)" : "";
+  setIcapStatus(`generando ${INTERP_SUGGEST_LABELS[kind]}${withImg}…`, "warn");
+  try {
+    const r = await postJSON("/api/interpcap/suggest", { kind });
+    if (r.ok) setIcapStatus(prevStatus, prevDot);
+    else setIcapStatus(r.error || "no se pudo generar la sugerencia", "err");
+  } catch (e) {
+    setIcapStatus("no se pudo contactar con el servidor", "err");
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+Object.entries(ICAP_SUGGEST_BUTTONS).forEach(([kind, id]) => {
+  $(id).onclick = () => requestIcapSuggestion(kind);
+});
+
 // ---------------------------- vista Configuración ----------------------------
 
 function setConfigStatus(text, kind) {
@@ -932,18 +1186,25 @@ function showView(name) {
   $("viewCambridge").classList.toggle("hidden", name !== "cambridge");
   $("viewSelector").classList.toggle("hidden", name !== "selector");
   $("viewInterprete").classList.toggle("hidden", name !== "interprete");
+  $("viewInterpCap").classList.toggle("hidden", name !== "interpcap");
   $("viewConfig").classList.toggle("hidden", name !== "config");
   $("menuTexto").classList.toggle("active", name === "texto");
   $("menuAudio").classList.toggle("active", name === "audio");
   $("menuCambridge").classList.toggle("active", name === "cambridge");
   $("menuSelector").classList.toggle("active", name === "selector");
   $("menuInterprete").classList.toggle("active", name === "interprete");
+  $("menuInterpCap").classList.toggle("active", name === "interpcap");
   $("menuConfig").classList.toggle("active", name === "config");
   // El canal de captura de audio de la extensión (a qué endpoint van los
   // clips) sigue a la vista visible, para no depender de que el usuario
   // pulse "Listar pestañas" antes de hacer clic en el icono de la extensión.
   if (name === "audio" || name === "interprete") {
     extCall("setCaptureChannel", { channel: name === "interprete" ? "interp" : "audio" });
+  }
+  if (name === "interpcap") {
+    extCall("setCaptureChannel", { channel: "interpcap" });
+    // La configuración compartida se edita en Intérprete: refrescar el resumen.
+    api("/api/state").then(applyIcapState).catch(() => {});
   }
 }
 // Menú lateral contraíble; se recuerda la preferencia en este navegador.
@@ -961,6 +1222,7 @@ $("menuAudio").onclick = () => showView("audio");
 $("menuCambridge").onclick = () => showView("cambridge");
 $("menuSelector").onclick = () => showView("selector");
 $("menuInterprete").onclick = () => showView("interprete");
+$("menuInterpCap").onclick = () => showView("interpcap");
 $("menuConfig").onclick = () => showView("config");
 
 // ---------------------------- init ----------------------------
@@ -968,3 +1230,4 @@ $("menuConfig").onclick = () => showView("config");
 loadState().then(connectWS);
 pollCaptureStatus();
 pollInterpCaptureStatus();
+pollIcapCaptureStatus();

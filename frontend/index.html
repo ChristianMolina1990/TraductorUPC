@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Traductor de transcripciones en vivo</title>
-  <link rel="stylesheet" href="/styles.css?v=14" />
+  <link rel="stylesheet" href="/styles.css?v=15" />
 </head>
 <body>
   <div class="app-shell">
@@ -19,6 +19,7 @@
         <li><button id="menuCambridge" class="sidebar-item">CAMBRIDGE</button></li>
         <li><button id="menuSelector" class="sidebar-item">Selector</button></li>
         <li><button id="menuInterprete" class="sidebar-item">Intérprete</button></li>
+        <li><button id="menuInterpCap" class="sidebar-item">Intérprete – Captura</button></li>
       </ul>
       <ul class="sidebar-menu sidebar-bottom">
         <li><button id="menuConfig" class="sidebar-item">⚙ Configuración</button></li>
@@ -376,6 +377,90 @@
       </div>
     </div>
 
+    <div id="viewInterpCap" class="view hidden">
+      <header class="bar">
+        <div class="bar-row">
+          <strong class="brand">Intérprete – Captura</strong>
+          <span id="icapDot" class="dot" title="estado"></span>
+          <span id="icapStatus" class="status">detenido</span>
+          <span class="spacer"></span>
+          <button id="btnIcapStart" class="ghost" title="Sugerir cómo abrir la conversación a partir de los temas y de lo que se ve en la pestaña">🚀 Iniciar conversación</button>
+          <button id="btnIcapSuggest" class="ghost" title="Pedir sugerencia de respuesta ahora">💡 Sugerir respuesta</button>
+          <button id="btnIcapComplement" class="ghost" title="Ampliar la última respuesta sugerida con un detalle o ejemplo">➕ Complementar respuesta</button>
+          <button id="btnIcapQuestion" class="ghost" title="Sugerir una pregunta para el interlocutor sobre el tema">❓ Hacer una pregunta</button>
+          <button id="btnIcapClear" class="ghost">🗑 Eliminar traducción</button>
+          <button id="btnIcapCopy" class="ghost">📋 Copiar transcripción</button>
+          <button id="btnIcapStop" class="ghost" disabled>■ Detener</button>
+        </div>
+        <div class="config open">
+          <div class="grp grow">
+            <label>Pestaña a capturar <span class="muted">(varias abiertas: elige una)</span></label>
+            <div class="inline">
+              <button id="btnIcapTabs" class="ghost" title="Listar pestañas">↻ Listar pestañas</button>
+              <button id="btnIcapTabsToggle" class="ghost" title="Contraer / expandir la lista de pestañas">▴ Contraer</button>
+            </div>
+            <ul id="icapTabList" class="list tab-list"><li class="muted">— pulsa "Listar pestañas" —</li></ul>
+            <div class="ext-help">
+              Igual que en <b>Intérprete</b>: elige la pestaña arriba (te lleva a ella) y haz clic en
+              el icono de la extensión <b>Traductor</b> en la barra de Chrome para empezar a
+              capturar. Vuelve a hacer clic (o pulsa <b>■ Detener</b> aquí) para parar.
+              <div id="extIcapStatus" class="ext-status">comprobando extensión…</div>
+            </div>
+          </div>
+          <div class="grp">
+            <label>Captura de la pestaña <span class="muted">(se envía a Claude con cada sugerencia)</span></label>
+            <label class="toggle">
+              <input id="icapSendImage" type="checkbox" />
+              <span>📸 Enviar captura a Claude</span>
+            </label>
+            <div id="icapImageInfo" class="ext-status">desactivada — no se envía imagen (sin coste extra)</div>
+            <div class="icap-thumb-wrap">
+              <img id="icapThumb" class="icap-thumb hidden" alt="Última captura enviada a Claude" />
+              <div id="icapThumbEmpty" class="icap-thumb-empty muted">sin captura</div>
+            </div>
+            <button id="btnIcapCaptureNow" class="ghost" disabled title="Tomar una captura de la pestaña ahora mismo">📸 Capturar ahora</button>
+          </div>
+          <div class="grp">
+            <label>Configuración <span class="muted">(compartida con Intérprete)</span></label>
+            <div id="icapSharedSummary" class="ext-help"></div>
+            <button id="btnIcapEditShared" class="ghost" title="Idiomas, modelo de voz, modo y temas se editan en Intérprete">✏ Editar en Intérprete</button>
+          </div>
+          <div class="grp full">
+            <div id="icapKeyStatus" class="ext-status link" title="Ir a Configuración">comprobando clave de Claude…</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="panes-stack">
+        <div class="section-title">Conversación (audio capturado)</div>
+        <main class="panes">
+          <section class="pane">
+            <h2>Original</h2>
+            <div id="icapColOriginal" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>Traducción (<span id="icapToLabel">es</span>)</h2>
+            <div id="icapColTranslated" class="col"></div>
+          </section>
+        </main>
+        <div class="section-title">💡 Sugerencia de respuesta (inglés) <span class="muted">— 🖼 = generada con captura</span></div>
+        <main class="panes triple">
+          <section class="pane">
+            <h2>Sugerido (en)</h2>
+            <div id="icapColSuggestionEn" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>🗣️ Pronunciación</h2>
+            <div id="icapColPronunciation" class="col"></div>
+          </section>
+          <section class="pane">
+            <h2>Traducción (<span id="icapSuggToLabel">es</span>)</h2>
+            <div id="icapColSuggestionEs" class="col"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
     <div id="viewConfig" class="view hidden">
       <header class="bar">
         <div class="bar-row">
@@ -401,6 +486,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=26"></script>
+  <script src="/app.js?v=27"></script>
 </body>
 </html>

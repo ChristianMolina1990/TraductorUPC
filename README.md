@@ -69,6 +69,29 @@ Si prefieres usar tu Chrome habitual en vez del navegador propio:
 2. En la app: **Modo de conexión → “Enganchar a mi Chrome (CDP :9222)”**.
 3. Pulsa **↻** junto a *Pestaña abierta* y elige la pestaña de la clase.
 
+### Modo Intérprete – Captura
+
+Igual que **Intérprete** (audio de la pestaña → transcripción → traducción →
+sugerencias de Claude), pero además puede enviar a Claude **una captura de la
+pestaña** para que entienda lo que se ve en pantalla (diapositivas, preguntas
+escritas, chat…). Se usa en los 4 botones (🚀 Iniciar, 💡 Sugerir, ➕ Complementar,
+❓ Pregunta) y en el modo automático.
+
+- Interruptor **📸 Enviar captura a Claude** (desactivado por defecto). Apagado:
+  no se toma ni se envía ninguna imagen (petición solo de texto, sin coste extra).
+- Activado: la extensión sube una captura cada ~5 s si la pantalla cambió, o al
+  momento con **📸 Capturar ahora**. Funciona aunque la pestaña no esté visible.
+  La miniatura muestra exactamente lo que recibe Claude; las sugerencias generadas
+  con imagen llevan 🖼.
+- Con captura activada, **Iniciar conversación** funciona aunque no haya temas.
+- Idiomas, modelo de voz, modo y temas son los del **Intérprete** (se editan allí).
+- Usa el modelo `claude-sonnet-5-5` con esfuerzo bajo, para que las respuestas
+  lleguen rápido; el Intérprete normal no cambia.
+
+> ⚠ Los modos Intérprete e Intérprete – Captura **sí envían datos a Anthropic**:
+> lo transcrito, los temas y, si el interruptor está activado, la captura de la
+> pestaña. El resto de la app funciona offline.
+
 ## Cómo funciona
 
 ```

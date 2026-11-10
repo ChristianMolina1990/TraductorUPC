@@ -14,6 +14,11 @@ let capturingTabTitle = "";
 let capturingChannel = "audio"; // canal realmente en uso mientras se captura
 let captureChannel = "audio";   // canal elegido desde la página del Traductor antes de capturar
 
+// Canales válidos: "audio", "interp" (Intérprete) e "interpcap" (Intérprete -
+// Captura, que además del audio pide el vídeo de la pestaña para sacar capturas).
+const CHANNELS = ["audio", "interp", "interpcap"];
+const normChannel = (ch) => (CHANNELS.includes(ch) ? ch : "audio");
+
 async function ensureOffscreen() {
   const has = await chrome.offscreen.hasDocument();
   if (!has) {
@@ -32,10 +37,13 @@ async function setBadge(tabId, capturing) {
 
 async function startAudioCapture(tab) {
   if (capturingTabId) await stopAudioCapture();
-  const channel = captureChannel === "interp" ? "interp" : "audio";
+  const channel = normChannel(captureChannel);
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   await ensureOffscreen();
-  await chrome.runtime.sendMessage({ type: "offscreen:start", streamId, api: API, channel });
+  await chrome.runtime.sendMessage({
+    type: "offscreen:start", streamId, api: API, channel,
+    video: channel === "interpcap",
+  });
   capturingTabId = tab.id;
   capturingTabTitle = tab.title || tab.url || "";
   capturingChannel = channel;
@@ -95,7 +103,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
   if (msg && msg.type === "setCaptureChannel") {
-    captureChannel = msg.channel === "interp" ? "interp" : "audio";
+    captureChannel = normChannel(msg.channel);
     sendResponse({ ok: true, channel: captureChannel });
     return false;
   }

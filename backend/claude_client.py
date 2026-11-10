@@ -7,9 +7,15 @@ funcionando igual que en el modo Audio.
 
 from __future__ import annotations
 
+import base64
 import re
 
 _MODEL = "claude-sonnet-5"
+
+# Modelo del modo "Interprete - Captura": entiende mejor las imagenes y, con
+# esfuerzo bajo, responde rapido (lo que importa en una conversacion en vivo).
+# El Interprete normal sigue usando _MODEL exactamente como antes.
+VISION_MODEL = "claude-sonnet-5-5"
 
 
 # Que se le pide a Claude segun el boton pulsado.
@@ -49,6 +55,8 @@ def suggest_reply(
     own_lines: list[str] | None = None,
     topics: str = "",
     model: str = _MODEL,
+    image: bytes | None = None,
+    capture_mode: bool = False,
 ) -> dict:
     """Dadas las ultimas frases dichas por el interlocutor (en su idioma
     original) y, opcionalmente, lo ultimo que ya se le sugirio decir a la
@@ -60,11 +68,15 @@ def suggest_reply(
     (preguntarle algo al interlocutor sobre el tema).
 
     topics: temas que la persona quiere tratar; si no hay nada transcrito
-    todavia, sirven para abrir la conversacion."""
+    todavia, sirven para abrir la conversacion.
+
+    image: captura JPEG de la pestana (solo modo "Interprete - Captura").
+    capture_mode: True en ese modo (usa VISION_MODEL con esfuerzo bajo). Con
+    los valores por defecto la peticion es identica a la del Interprete."""
     if not api_key:
         raise ValueError("falta la API key de Anthropic (configúrala en '⚙ Configuración')")
     topics = (topics or "").strip()
-    if not recent_lines and not topics:
+    if not recent_lines and not topics and not image:
         return {"reply": "", "pronunciation": ""}
     task = _TASKS.get(kind, _TASKS["reply"])
 
@@ -95,11 +107,25 @@ def suggest_reply(
             "orientar lo que sugieras y llevar la conversación hacia ellos cuando encaje "
             "de forma natural):\n\n" + topics
         )
+    image_block = ""
+    if image:
+        image_block = (
+            "\n\nSe adjunta además una captura de pantalla actual de la pestaña donde ocurre "
+            "la conversación (por ejemplo una videollamada, una diapositiva, una pregunta "
+            "escrita o un chat). Úsala como contexto: si en ella aparece una pregunta, un tema "
+            "o información relevante, tenlo en cuenta en lo que sugieras; si no aporta nada "
+            "útil, ignórala."
+        )
+        if not topics:
+            image_block += (
+                " No se indicaron temas a tratar: si hace falta un tema, tómalo de lo que se "
+                "ve en la captura."
+            )
     prompt = (
         "Estás ayudando a alguien a mantener una conversación fluida en inglés en tiempo real "
         "(por ejemplo una entrevista, clase, reunión o prueba oral)."
         f"{topic_block}\n\n"
-        f"{convo}{own}\n\n"
+        f"{convo}{own}{image_block}\n\n"
         f"{task}\n\n"
         "Responde con EXACTAMENTE estas dos líneas, sin nada más antes ni después:\n"
         "RESPUESTA: <el texto sugerido, en inglés, sin comillas>\n"
@@ -107,13 +133,49 @@ def suggest_reply(
         "sonidos del español para que lo pueda leer en voz alta alguien que no domina "
         "el inglés; marca la sílaba tónica de cada palabra en MAYÚSCULAS>"
     )
-    resp = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text").strip()
+    if capture_mode:
+        resp = _create_capture(client, prompt, image)
+    else:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    text ="".join(block.text for block in resp.content if getattr(block, "type", "") == "text").strip()
     return _parse_reply(text)
+
+
+def _create_capture(client, prompt: str, image: bytes | None):
+    """Peticion del modo "Interprete - Captura": imagen opcional + texto.
+
+    - effort "low": en una conversacion en vivo prima la rapidez.
+    - fallbacks "default": si el filtro de seguridad rechazara la peticion,
+      la API la reintenta sola con otro modelo en la misma llamada.
+    """
+    content: list[dict] = []
+    if image:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": base64.standard_b64encode(image).decode("ascii"),
+            },
+        })
+    content.append({"type": "text", "text": prompt})
+    resp = client.beta.messages.create(
+        model=VISION_MODEL,
+        # El razonamiento interno tambien cuenta para max_tokens; se deja
+        # margen para que la respuesta no salga cortada.
+        max_tokens=4096,
+        output_config={"effort": "low"},
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        messages=[{"role": "user", "content": content}],
+    )
+    if resp.stop_reason == "refusal":
+        raise ValueError("Claude no quiso responder a esta petición (prueba otra vez o desactiva la captura)")
+    return resp
 
 
 def _parse_reply(text: str) -> dict:

@@ -69,6 +69,12 @@ class Settings:
     interp_topics: str = ""
     anthropic_api_key: str = ""
 
+    # --- Interprete - Captura ---
+    # Comparte (solo lectura) idiomas, modelo de voz, modo y temas con el
+    # Interprete. Lo unico propio es si se envia o no la captura de la pestana
+    # a Claude: desactivado por defecto para no generar coste sin querer.
+    interpcap_send_image: bool = False
+
     def save(self) -> None:
         with _lock:
             CONFIG_PATH.write_text(

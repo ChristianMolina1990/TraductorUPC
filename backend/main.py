@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import page_translate
@@ -18,6 +18,7 @@ from .capture import Capture
 from .config import Settings, MODELS_DIR, PROFILE_DIR
 from .ingest import ingest
 from .interp_pipeline import InterpreterPipeline
+from .interpcap_pipeline import InterpCapturePipeline
 from .pipeline import Pipeline
 from .selection_pipeline import SelectionPipeline
 
@@ -55,6 +56,7 @@ pipeline = Pipeline(capture, settings, broadcast)
 audio_pipeline = AudioPipeline(settings, broadcast)
 selection_pipeline = SelectionPipeline(settings, broadcast)
 interp_pipeline = InterpreterPipeline(settings, broadcast)
+interpcap_pipeline = InterpCapturePipeline(settings, broadcast)
 
 
 @app.on_event("startup")
@@ -74,6 +76,8 @@ async def _shutdown() -> None:
         await selection_pipeline.stop()
     with contextlib.suppress(Exception):
         await interp_pipeline.stop()
+    with contextlib.suppress(Exception):
+        await interpcap_pipeline.stop()
     with contextlib.suppress(Exception):
         await capture.stop()
 
@@ -96,6 +100,7 @@ async def get_state():
         "can_translate_selection": mt.can_translate(settings.sel_from_code, settings.sel_to_code),
         "interp_pipeline": interp_pipeline.snapshot(),
         "can_translate_interp": mt.can_translate(settings.interp_from_code, settings.interp_to_code),
+        "interpcap_pipeline": interpcap_pipeline.snapshot(),
         "has_anthropic_key": bool(settings.anthropic_api_key),
         "ingest": {"age": round(ingest.age(), 1), "chars": len(ingest.text),
                    "source_url": ingest.source_url},
@@ -126,11 +131,18 @@ async def update_settings(payload: dict):
         "sel_from_code", "sel_to_code",
         "interp_from_code", "interp_to_code", "interp_whisper_model",
         "interp_trigger", "interp_topics", "anthropic_api_key",
+        "interpcap_send_image",
     }
     payload = {k: v for k, v in (payload or {}).items() if k in allowed}
     if payload.get("attach_mode") not in (None, "launch", "cdp", "extension"):
         payload.pop("attach_mode")
+    if "interpcap_send_image" in payload and not isinstance(payload["interpcap_send_image"], bool):
+        payload.pop("interpcap_send_image")
     settings.update(**payload)
+    if payload.get("interpcap_send_image") is False:
+        # Al apagar el interruptor se descarta la captura guardada: nunca se
+        # enviara una imagen vieja al volver a activarlo.
+        await interpcap_pipeline.clear_image()
     # Reflejar en Capture (surte efecto al reconectar / al proximo ensure_page).
     capture.attach_mode = settings.attach_mode
     capture.cdp_url = settings.cdp_url
@@ -297,6 +309,78 @@ async def interp_suggest(payload: dict | None = None):
     return await interp_pipeline.suggest_manual(kind)
 
 
+# ------------------------ Pipeline Intérprete - Captura ------------------------
+# Mismos pasos que el Intérprete; la configuración (idiomas, voz, modo, temas)
+# es la del Intérprete. Lo propio es la captura de la pestaña.
+
+@app.post("/api/interpcap/start")
+async def interpcap_start():
+    if not mt.can_translate(settings.interp_from_code, settings.interp_to_code):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False,
+                     "error": f"falta el modelo de idioma {settings.interp_from_code}->{settings.interp_to_code}. "
+                              f"Instalalo desde 'Idiomas'"},
+        )
+    await interpcap_pipeline.start()
+    return {"ok": True}
+
+
+@app.post("/api/interpcap/stop")
+async def interpcap_stop():
+    await interpcap_pipeline.stop()
+    return {"ok": True}
+
+
+@app.post("/api/interpcap/chunk")
+async def interpcap_chunk(request: Request):
+    data = await request.body()
+    await interpcap_pipeline.ingest_chunk(data)
+    return {"ok": True}
+
+
+@app.post("/api/interpcap/clear")
+async def interpcap_clear():
+    await interpcap_pipeline.clear()
+    return {"ok": True}
+
+
+@app.post("/api/interpcap/suggest")
+async def interpcap_suggest(payload: dict | None = None):
+    kind = (payload or {}).get("kind", "reply")
+    return await interpcap_pipeline.suggest_manual(kind)
+
+
+@app.get("/api/interpcap/config")
+async def interpcap_config():
+    """La extensión consulta aquí si debe tomar capturas y si hay que forzar una."""
+    return {
+        "send_image": interpcap_pipeline.send_image,
+        "force": interpcap_pipeline.force_capture,
+    }
+
+
+@app.post("/api/interpcap/frame")
+async def interpcap_frame_upload(request: Request):
+    data = await request.body()
+    stored = await interpcap_pipeline.ingest_frame(data)
+    return {"ok": True, "stored": stored}
+
+
+@app.get("/api/interpcap/frame")
+async def interpcap_frame_get():
+    """Última captura (para la miniatura de la interfaz)."""
+    img = interpcap_pipeline.image if interpcap_pipeline.send_image else None
+    if not img:
+        return Response(status_code=404)
+    return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/interpcap/capture-now")
+async def interpcap_capture_now():
+    return interpcap_pipeline.request_capture()
+
+
 # ----------------------------- Pagina (CAMBRIDGE) -----------------------------
 
 @app.post("/api/page/translate")
@@ -410,6 +494,7 @@ async def ws_endpoint(ws: WebSocket):
         await ws.send_json({"type": "audio_snapshot", **audio_pipeline.snapshot()})
         await ws.send_json({"type": "selection_snapshot", **selection_pipeline.snapshot()})
         await ws.send_json({"type": "interp_snapshot", **interp_pipeline.snapshot()})
+        await ws.send_json({"type": "interpcap_snapshot", **interpcap_pipeline.snapshot()})
         while True:
             await ws.receive_text()  # no esperamos mensajes; mantiene viva la conexion
     except WebSocketDisconnect:

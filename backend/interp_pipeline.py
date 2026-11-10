@@ -30,9 +30,12 @@ _KINDS = ("start", "reply", "complement", "question")
 
 
 class InterpreterPipeline:
-    def __init__(self, settings, broadcast: Callable[[dict], Awaitable[None]]):
+    def __init__(self, settings, broadcast: Callable[[dict], Awaitable[None]], channel: str = "interp"):
         self.settings = settings
         self.broadcast = broadcast
+        # Prefijo de los mensajes WebSocket ("interp_status", "interp_segment"...).
+        # "Interprete - Captura" reutiliza esta clase con su propio canal.
+        self.channel = channel
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_MAX_QUEUE)
         self._task: asyncio.Task | None = None
         self._running = False
@@ -65,7 +68,7 @@ class InterpreterPipeline:
         self._running = True
         self.last_status = "esperando audio de la pestaña…"
         self._task = asyncio.create_task(self._worker())
-        await self.broadcast({"type": "interp_status", "status": self.last_status, "running": True})
+        await self.broadcast({"type": f"{self.channel}_status", "status": self.last_status, "running": True})
 
     async def stop(self) -> None:
         self._running = False
@@ -79,13 +82,13 @@ class InterpreterPipeline:
         while not self._queue.empty():
             self._queue.get_nowait()
         self.last_status = "detenido"
-        await self.broadcast({"type": "interp_status", "status": self.last_status, "running": False})
+        await self.broadcast({"type": f"{self.channel}_status", "status": self.last_status, "running": False})
 
     async def clear(self) -> None:
         self.history.clear()
         self.suggestions.clear()
         self._pending_suggestion = False
-        await self.broadcast({"type": "interp_snapshot", **self.snapshot()})
+        await self.broadcast({"type": f"{self.channel}_snapshot", **self.snapshot()})
 
     async def ingest_chunk(self, data: bytes) -> None:
         if not self._running or not data:
@@ -118,7 +121,7 @@ class InterpreterPipeline:
                 self.history.append(item)
                 self._pending_suggestion = True
                 self.last_status = "transcribiendo"
-                await self.broadcast({"type": "interp_segment", **item})
+                await self.broadcast({"type": f"{self.channel}_segment", **item})
             elif s.interp_trigger == "auto" and self._pending_suggestion:
                 # Clip en silencio tras haber transcrito algo: el interlocutor
                 # acaba de hacer una pausa, es el momento de sugerir.
@@ -129,14 +132,14 @@ class InterpreterPipeline:
         """Sugerencia automatica (modo auto) tras una pausa del interlocutor."""
         if not self.settings.anthropic_api_key:
             self.last_status = "falta la API key de Claude (configúrala en ⚙ Configuración)"
-            await self.broadcast({"type": "interp_status", "status": self.last_status, "running": True})
+            await self.broadcast({"type": f"{self.channel}_status", "status": self.last_status, "running": True})
             return
         try:
             await self._suggest("reply")
         except Exception as exc:
             log.warning("no se pudo generar sugerencia: %s", exc)
             self.last_status = f"error de Claude: {exc}"
-            await self.broadcast({"type": "interp_status", "status": self.last_status, "running": True})
+            await self.broadcast({"type": f"{self.channel}_status", "status": self.last_status, "running": True})
 
     async def suggest_manual(self, kind: str = "reply") -> dict:
         """Genera bajo demanda una sugerencia a partir de lo ya transcrito.
@@ -146,9 +149,12 @@ class InterpreterPipeline:
         sugerida) o "question" (preguntar al interlocutor)."""
         if kind not in _KINDS:
             return {"ok": False, "error": f"tipo de sugerencia desconocido: {kind}"}
-        if kind == "start" and not self.settings.interp_topics.strip():
-            return {"ok": False, "error": "escribe primero los temas a tratar para iniciar la conversación"}
-        if not self.history and (kind == "complement" or not self.settings.interp_topics.strip()):
+        # Contexto para abrir/proponer sin transcripcion: los temas y, en
+        # "Interprete - Captura", tambien la imagen de la pestana.
+        has_context = bool(self.settings.interp_topics.strip()) or self._has_visual_context()
+        if kind == "start" and not has_context:
+            return {"ok": False, "error": self._no_context_error()}
+        if not self.history and (kind == "complement" or not has_context):
             return {"ok": False, "error": "todavía no hay nada transcrito (o escribe los temas a tratar)"}
         if kind == "complement" and not self.suggestions:
             return {"ok": False, "error": "primero pide una respuesta para poder complementarla"}
@@ -168,8 +174,9 @@ class InterpreterPipeline:
         else:
             recent = [h["original"] for h in self.history[-_CONTEXT_LINES:]]
             own = [h["suggestion_en"] for h in self.suggestions[-_OWN_CONTEXT_LINES:]]
+        extra = self._suggest_extra()
         result = await asyncio.to_thread(
-            claude_client.suggest_reply, s.anthropic_api_key, recent, kind, own, s.interp_topics
+            claude_client.suggest_reply, s.anthropic_api_key, recent, kind, own, s.interp_topics, **extra
         )
         suggestion_en = result["reply"]
         if not suggestion_en:
@@ -181,12 +188,29 @@ class InterpreterPipeline:
             "suggestion_es": suggestion_es,
             "pronunciation": result["pronunciation"],
             "ts": time.time(),
+            **self._suggestion_meta(extra),
         }
         self.suggestions.append(item)
         self._pending_suggestion = False
         if self._running:
             self.last_status = "transcribiendo"
-        await self.broadcast({"type": "interp_suggestion", **item})
+        await self.broadcast({"type": f"{self.channel}_suggestion", **item})
+
+    # ---- Ganchos para "Interprete - Captura" (aqui no cambian nada) ----
+
+    def _has_visual_context(self) -> bool:
+        return False
+
+    def _no_context_error(self) -> str:
+        return "escribe primero los temas a tratar para iniciar la conversación"
+
+    def _suggest_extra(self) -> dict:
+        """Argumentos adicionales para claude_client.suggest_reply."""
+        return {}
+
+    def _suggestion_meta(self, extra: dict) -> dict:
+        """Campos adicionales en cada sugerencia emitida."""
+        return {}
 
     @staticmethod
     def _transcribe(data: bytes, model_size: str, language: str) -> str:
