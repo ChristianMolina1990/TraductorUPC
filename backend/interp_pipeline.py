@@ -24,7 +24,13 @@ from . import translate as mt
 log = logging.getLogger(__name__)
 
 _MAX_QUEUE = 3
-_CONTEXT_LINES = 8
+# Limites del contexto configurable (ajustes interp_context_*).
+CONTEXT_LINES_MIN, CONTEXT_LINES_MAX = 1, 100
+CONTEXT_MINUTES_MIN, CONTEXT_MINUTES_MAX = 0.5, 15.0
+# Si la ventana de tiempo no contiene nada (la otra persona lleva un rato
+# callada) se envian igualmente las ultimas lineas, para que Claude no crea
+# que la conversacion no ha empezado.
+_EMPTY_WINDOW_LINES = 3
 _OWN_CONTEXT_LINES = 4
 _KINDS = ("start", "reply", "complement", "question")
 
@@ -166,13 +172,35 @@ class InterpreterPipeline:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
 
+    def _recent_context(self) -> list[str]:
+        """Lineas de la transcripcion que se envian a Claude segun el ajuste."""
+        s = self.settings
+        if s.interp_context_mode == "time":
+            try:
+                minutes = float(s.interp_context_minutes)
+            except (TypeError, ValueError):
+                minutes = 2.0
+            minutes = min(max(minutes, CONTEXT_MINUTES_MIN), CONTEXT_MINUTES_MAX)
+            cutoff = time.time() - minutes * 60
+            items = [h for h in self.history if h["ts"] >= cutoff][-CONTEXT_LINES_MAX:]
+            if not items:
+                items = self.history[-_EMPTY_WINDOW_LINES:]
+        else:
+            try:
+                n = int(s.interp_context_lines)
+            except (TypeError, ValueError):
+                n = 8
+            n = min(max(n, CONTEXT_LINES_MIN), CONTEXT_LINES_MAX)
+            items = self.history[-n:]
+        return [h["original"] for h in items]
+
     async def _suggest(self, kind: str) -> None:
         s = self.settings
         if kind == "start":
             # Apertura: solo cuentan los temas, no lo transcrito ni lo sugerido antes.
             recent, own = [], []
         else:
-            recent = [h["original"] for h in self.history[-_CONTEXT_LINES:]]
+            recent = self._recent_context()
             own = [h["suggestion_en"] for h in self.suggestions[-_OWN_CONTEXT_LINES:]]
         extra = self._suggest_extra()
         result = await asyncio.to_thread(

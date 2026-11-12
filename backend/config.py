@@ -67,6 +67,12 @@ class Settings:
     interp_trigger: str = "auto"  # "auto" = sugiere tras cada frase | "manual" = con boton
     # Temas que el usuario quiere tratar; orientan las sugerencias de Claude.
     interp_topics: str = ""
+    # Cuanto de la transcripcion se envia a Claude como contexto (compartido por
+    # Interprete e Interprete - Captura): las ultimas N lineas (una linea ~ un
+    # clip de 3 s) o lo dicho en los ultimos N minutos.
+    interp_context_mode: str = "lines"  # "lines" | "time"
+    interp_context_lines: int = 8
+    interp_context_minutes: float = 2.0
     anthropic_api_key: str = ""
 
     # --- Interprete - Captura ---

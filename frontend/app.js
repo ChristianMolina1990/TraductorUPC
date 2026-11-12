@@ -231,6 +231,7 @@ async function loadState() {
   $("interpTrigger").value = settings.interp_trigger || "auto";
   // No pisar lo que el usuario esta escribiendo si se recarga el estado.
   if (document.activeElement !== $("interpTopics")) $("interpTopics").value = settings.interp_topics || "";
+  applyCtxSettings(settings);
   applyInterpTriggerUI();
   applyInterpRunning(s.interp_pipeline.running);
   if (s.interp_pipeline.status) setInterpStatus(s.interp_pipeline.status, s.interp_pipeline.running ? "on" : null);
@@ -919,6 +920,102 @@ Object.entries(INTERP_SUGGEST_BUTTONS).forEach(([kind, id]) => {
   $(id).onclick = () => requestInterpSuggestion(kind);
 });
 
+// ------------------- contexto que se envía a Claude (ambos Intérpretes) -------------------
+// Un único ajuste compartido; el control aparece en Intérprete ("interp") y en
+// Intérprete – Captura ("icap") y ambos se mantienen sincronizados.
+
+const CTX_PREFIXES = ["interp", "icap"];
+const CTX_LIMITS = { lines: [1, 100], minutes: [0.5, 15] };
+const SECONDS_PER_LINE = 3; // una línea ≈ un clip de audio de 3 s
+
+function fmtDuration(sec) {
+  if (sec < 60) return `${Math.round(sec)} s`;
+  const min = sec / 60;
+  return `${Number.isInteger(min) ? min : min.toFixed(1).replace(".", ",")} min`;
+}
+
+function updateCtxHints(px) {
+  const mode = $(px + "CtxModeTime").checked ? "time" : "lines";
+  $(px + "CtxLines").disabled = mode !== "lines";
+  $(px + "CtxMinutes").disabled = mode !== "time";
+  const n = Number($(px + "CtxLines").value);
+  $(px + "CtxLinesHint").textContent = n > 0 ? `≈ ${fmtDuration(n * SECONDS_PER_LINE)} de habla` : "";
+  const m = Number($(px + "CtxMinutes").value);
+  $(px + "CtxMinutesHint").textContent = m > 0
+    ? `≈ ${Math.min(CTX_LIMITS.lines[1], Math.round((m * 60) / SECONDS_PER_LINE))} líneas (máx. ${CTX_LIMITS.lines[1]})`
+    : "";
+}
+
+function ctxSummary(st) {
+  return st.interp_context_mode === "time"
+    ? `lo dicho en los últimos ${fmtDuration((st.interp_context_minutes || 2) * 60)}`
+    : `últimas ${st.interp_context_lines || 8} líneas`;
+}
+
+// Refleja el ajuste guardado en los dos controles (sin pisar el que se está editando).
+function applyCtxSettings(st) {
+  CTX_PREFIXES.forEach((px) => {
+    const editing = document.activeElement;
+    $(px + (st.interp_context_mode === "time" ? "CtxModeTime" : "CtxModeLines")).checked = true;
+    if (editing !== $(px + "CtxLines")) $(px + "CtxLines").value = st.interp_context_lines ?? 8;
+    if (editing !== $(px + "CtxMinutes")) $(px + "CtxMinutes").value = st.interp_context_minutes ?? 2;
+    updateCtxHints(px);
+  });
+}
+
+function setCtxStatus(text, ok) {
+  CTX_PREFIXES.forEach((px) => {
+    $(px + "CtxStatus").textContent = text;
+    $(px + "CtxStatus").classList.toggle("ok", !!ok);
+  });
+}
+
+let ctxSaveTimer = null;
+async function saveCtx(px) {
+  clearTimeout(ctxSaveTimer);
+  ctxSaveTimer = null;
+  const mode = $(px + "CtxModeTime").checked ? "time" : "lines";
+  const payload = { interp_context_mode: mode };
+  const lines = Number($(px + "CtxLines").value);
+  const minutes = Number($(px + "CtxMinutes").value);
+  const [lMin, lMax] = CTX_LIMITS.lines;
+  const [mMin, mMax] = CTX_LIMITS.minutes;
+  if (mode === "lines") {
+    if (!Number.isInteger(lines) || lines < lMin || lines > lMax) {
+      setCtxStatus(`las líneas deben ser un número entero entre ${lMin} y ${lMax}`);
+      return;
+    }
+    payload.interp_context_lines = lines;
+  } else {
+    if (!Number.isFinite(minutes) || minutes < mMin || minutes > mMax) {
+      setCtxStatus(`los minutos deben estar entre ${String(mMin).replace(".", ",")} y ${mMax}`);
+      return;
+    }
+    payload.interp_context_minutes = minutes;
+  }
+  let r = null;
+  try { r = await postJSON("/api/settings", payload); } catch (e) {}
+  if (!r || !r.ok) { setCtxStatus("no se pudo guardar el contexto"); return; }
+  applyCtxSettings(r.settings);
+  api("/api/state").then(applyIcapState).catch(() => {}); // resumen de Captura
+  setCtxStatus(`✓ guardado: se envían ${ctxSummary(r.settings)}`, true);
+}
+
+CTX_PREFIXES.forEach((px) => {
+  [px + "CtxModeLines", px + "CtxModeTime"].forEach((id) => {
+    $(id).addEventListener("change", () => { updateCtxHints(px); saveCtx(px); });
+  });
+  [px + "CtxLines", px + "CtxMinutes"].forEach((id) => {
+    $(id).addEventListener("input", () => {
+      updateCtxHints(px);
+      setCtxStatus("guardando…");
+      clearTimeout(ctxSaveTimer);
+      ctxSaveTimer = setTimeout(() => saveCtx(px), 700);
+    });
+    $(id).addEventListener("blur", () => { if (ctxSaveTimer) saveCtx(px); });
+  });
+});
+
 // ---------------------------- vista Intérprete – Captura ----------------------------
 // Mismo flujo que Intérprete (canal "interpcap"), más la captura de la pestaña.
 // Idiomas, modelo de voz, modo y temas se leen de la configuración del
@@ -993,6 +1090,7 @@ function applyIcapState(s) {
     ["Modelo de voz", st.interp_whisper_model || "base"],
     ["Sugerencia", st.interp_trigger === "manual" ? "solo con los botones" : "automática + botones"],
     ["Temas", topics ? (topics.length > 80 ? topics.slice(0, 80) + "…" : topics) : "— ninguno —"],
+    ["Contexto para Claude", ctxSummary(st)],
   ].forEach(([k, v]) => {
     const row = document.createElement("div");
     const b = document.createElement("b");

@@ -17,7 +17,10 @@ from .audio_pipeline import AudioPipeline
 from .capture import Capture
 from .config import Settings, MODELS_DIR, PROFILE_DIR
 from .ingest import ingest
-from .interp_pipeline import InterpreterPipeline
+from .interp_pipeline import (
+    CONTEXT_LINES_MAX, CONTEXT_LINES_MIN, CONTEXT_MINUTES_MAX, CONTEXT_MINUTES_MIN,
+    InterpreterPipeline,
+)
 from .interpcap_pipeline import InterpCapturePipeline
 from .pipeline import Pipeline
 from .selection_pipeline import SelectionPipeline
@@ -132,12 +135,31 @@ async def update_settings(payload: dict):
         "interp_from_code", "interp_to_code", "interp_whisper_model",
         "interp_trigger", "interp_topics", "anthropic_api_key",
         "interpcap_send_image",
+        "interp_context_mode", "interp_context_lines", "interp_context_minutes",
     }
     payload = {k: v for k, v in (payload or {}).items() if k in allowed}
     if payload.get("attach_mode") not in (None, "launch", "cdp", "extension"):
         payload.pop("attach_mode")
     if "interpcap_send_image" in payload and not isinstance(payload["interpcap_send_image"], bool):
         payload.pop("interpcap_send_image")
+    # Contexto para Claude: valores fuera de rango o de otro tipo se ignoran.
+    if payload.get("interp_context_mode") not in (None, "lines", "time"):
+        payload.pop("interp_context_mode")
+    if "interp_context_lines" in payload:
+        v = payload["interp_context_lines"]
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)
+        if isinstance(v, bool) or not isinstance(v, int) or not (CONTEXT_LINES_MIN <= v <= CONTEXT_LINES_MAX):
+            payload.pop("interp_context_lines")
+        else:
+            payload["interp_context_lines"] = v
+    if "interp_context_minutes" in payload:
+        v = payload["interp_context_minutes"]
+        if (isinstance(v, bool) or not isinstance(v, (int, float))
+                or not (CONTEXT_MINUTES_MIN <= v <= CONTEXT_MINUTES_MAX)):
+            payload.pop("interp_context_minutes")
+        else:
+            payload["interp_context_minutes"] = float(v)
     settings.update(**payload)
     if payload.get("interpcap_send_image") is False:
         # Al apagar el interruptor se descarta la captura guardada: nunca se

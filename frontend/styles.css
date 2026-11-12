@@ -153,6 +153,10 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 /* ---------------------- Intérprete – Captura ---------------------- */
 .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text) !important; }
 .toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.ctx-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.ctx-row .toggle { min-width: 82px; }
+.ctx-num { width: 72px; }
+.ctx-num:disabled { opacity: .45; }
 .icap-thumb-wrap {
   margin-top: 6px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden;
   background: var(--bg); aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;

@@ -88,6 +88,19 @@ escritas, chat…). Se usa en los 4 botones (🚀 Iniciar, 💡 Sugerir, ➕ Com
 - Usa el modelo `claude-sonnet-5-5` con esfuerzo bajo, para que las respuestas
   lleguen rápido; el Intérprete normal no cambia.
 
+### Contexto que se envía a Claude (ambos Intérpretes)
+
+En **Intérprete** y en **Intérprete – Captura** (es un único ajuste compartido)
+eliges cuánto de la transcripción recibe Claude en cada sugerencia:
+
+- **Últimas N líneas** (por defecto 8, de 1 a 100). Cada línea es un clip de
+  ~3 s con voz, así que 8 líneas ≈ 24 s de habla.
+- **Últimos N minutos** (de 0,5 a 15), con un tope de 100 líneas. Si en ese
+  tiempo no se transcribió nada, se envían las 3 últimas líneas.
+
+Además se envían las 4 últimas sugerencias y los temas. **Iniciar conversación**
+no envía transcripción. Más contexto = algo más de tokens por petición.
+
 > ⚠ Los modos Intérprete e Intérprete – Captura **sí envían datos a Anthropic**:
 > lo transcrito, los temas y, si el interruptor está activado, la captura de la
 > pestaña. El resto de la app funciona offline.
